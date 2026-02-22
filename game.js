@@ -223,6 +223,27 @@ class SoundFX {
         osc.stop(t + 0.25);
     }
 
+    // skill move — quick swoosh
+    skill() {
+        this.ensure();
+        if (!this.ctx || this.muted) return;
+        const t = this.ctx.currentTime;
+
+        const g = this.ctx.createGain();
+        g.connect(this.ctx.destination);
+        g.gain.setValueAtTime(0.25, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, t);
+        osc.frequency.exponentialRampToValueAtTime(900, t + 0.1);
+        osc.frequency.exponentialRampToValueAtTime(600, t + 0.18);
+        osc.connect(g);
+        osc.start(t);
+        osc.stop(t + 0.18);
+    }
+
     // points scored — cheerful ding
     points() {
         this.ensure();
@@ -1149,12 +1170,16 @@ class DribbleScene extends Phaser.Scene {
         this.wasd = this.input.keyboard.addKeys('W,A,S,D');
         this.sprintKey = this.input.keyboard.addKey('SHIFT');
         this.shootKey = this.input.keyboard.addKey('SPACE');
+        this.skillKey = this.input.keyboard.addKey('E');
         this.hasBall = true;       // player is dribbling
         this.shotFired = false;    // ball is in flight
         this.charging = false;     // holding space to charge
         this.shotPower = 0;        // 0-100
         this.stamina = 100;
         this.sprinting = false;
+        this.skillCooldown = 0;
+        this.skillActive = false;
+        this.skillTimer = 0;
         this.touchTarget = null;
         this.touchSprinting = false;
         this.input.on('pointerdown', (p) => { this.touchTarget = { x: p.x, y: p.y }; });
@@ -1178,13 +1203,20 @@ class DribbleScene extends Phaser.Scene {
         }).setOrigin(0.5, 0).setDepth(100);
 
         // Stamina bar
-        this.add.text(10, GAME_H - STAND_H + 8, 'SPRINT [Shift]  |  SHOOT [Space]', {
+        this.add.text(10, GAME_H - STAND_H + 8, 'SPRINT [Shift]  |  SHOOT [Space]  |  SKILL [E]', {
             fontSize: '11px', fontFamily: 'Arial', color: '#aaaaaa',
         }).setDepth(100);
         this.staminaBarBg = this.add.graphics().setDepth(100);
         this.staminaBarBg.fillStyle(0x000000, 0.5);
         this.staminaBarBg.fillRoundedRect(10, GAME_H - STAND_H + 24, 120, 12, 3);
         this.staminaBarFill = this.add.graphics().setDepth(101);
+
+        // Skill cooldown indicator
+        this.skillLabel = this.add.text(140, GAME_H - STAND_H + 24, 'E', {
+            fontSize: '12px', fontFamily: 'Arial Black, Arial',
+            color: '#44ff88', stroke: '#000000', strokeThickness: 2,
+        }).setDepth(101);
+        this.skillGfx = this.add.graphics().setDepth(100);
 
         // Shot power bar (drawn above player, only visible while charging)
         this.powerBarGfx = this.add.graphics().setDepth(150);
@@ -1230,6 +1262,104 @@ class DribbleScene extends Phaser.Scene {
             def.setData('chaseRange', 150 + this.level * 15);
             this.defenders.add(def);
         }
+    }
+
+    performSkill() {
+        if (!this.alive || this.scored || !this.hasBall || this.skillCooldown > 0) return;
+
+        sfx.skill();
+        this.skillCooldown = 2000; // 2 second cooldown
+        this.skillActive = true;
+        this.skillTimer = 350;     // skill lasts 350ms
+
+        // determine juke direction — perpendicular to movement
+        const vx = this.player.body.velocity.x;
+        const vy = this.player.body.velocity.y;
+        // juke sideways relative to movement (or just upward if standing still)
+        let jukeX, jukeY;
+        if (Math.abs(vx) > 10 || Math.abs(vy) > 10) {
+            // perpendicular to velocity
+            jukeX = -vy;
+            jukeY = vx;
+            // pick the side based on which direction key is more recent
+            const up = this.cursors.up.isDown || this.wasd.W.isDown;
+            const down = this.cursors.down.isDown || this.wasd.S.isDown;
+            if (down) { jukeX = -jukeX; jukeY = -jukeY; }
+        } else {
+            // standing still — juke upward
+            jukeX = 0; jukeY = -1;
+        }
+        // normalize
+        const len = Math.sqrt(jukeX * jukeX + jukeY * jukeY) || 1;
+        jukeX /= len; jukeY /= len;
+
+        // quick burst movement
+        const burstSpeed = 350;
+        this.player.body.setVelocity(jukeX * burstSpeed, jukeY * burstSpeed);
+
+        // stun nearby defenders — they freeze and get faked out
+        const stunRange = 80;
+        this.defenders.getChildren().forEach(def => {
+            const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, def.x, def.y);
+            if (dist < stunRange) {
+                def.setData('stunned', true);
+                def.setTint(0x888888);
+                def.body.setVelocity(0, 0);
+                // fake them out — they move the wrong way briefly
+                def.body.setVelocity(-jukeX * 60, -jukeY * 60);
+                this.time.delayedCall(800, () => {
+                    if (def.active) {
+                        def.setData('stunned', false);
+                        def.clearTint();
+                    }
+                });
+            }
+        });
+
+        // also fake out keeper if close enough
+        const keeperDist = Phaser.Math.Distance.Between(this.player.x, this.player.y, this.keeper.x, this.keeper.y);
+        if (keeperDist < stunRange) {
+            this.keeper.setData('stunned', true);
+            this.keeper.setTint(0x888888);
+            this.keeper.body.setVelocity(-jukeX * 50, -jukeY * 50);
+            this.time.delayedCall(600, () => {
+                if (this.keeper.active) {
+                    this.keeper.setData('stunned', false);
+                    this.keeper.clearTint();
+                }
+            });
+        }
+
+        // particle trail
+        for (let i = 0; i < 4; i++) {
+            this.time.delayedCall(i * 60, () => {
+                this.starEmitter.emitParticleAt(this.player.x, this.player.y, 3);
+            });
+        }
+
+        // bonus points for juking near a defender
+        this.defenders.getChildren().forEach(def => {
+            const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, def.x, def.y);
+            if (dist < stunRange) {
+                const pts = 25 * this.level;
+                this.score += pts;
+                this.showFloatingScore(def.x, def.y, pts);
+                sfx.points();
+            }
+        });
+    }
+
+    showFloatingScore(x, y, points) {
+        const txt = this.add.text(x, y, `+${points}`, {
+            fontSize: '22px', fontFamily: 'Arial Black, Arial',
+            color: '#ffff00', stroke: '#000000', strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(150);
+
+        this.tweens.add({
+            targets: txt, y: y - 50, alpha: 0,
+            duration: 800, ease: 'Power2',
+            onComplete: () => txt.destroy(),
+        });
     }
 
     shootBall(power) {
@@ -1455,10 +1585,37 @@ class DribbleScene extends Phaser.Scene {
         this.player.body.setVelocity(vx, vy);
 
         // sprint tint
-        if (this.sprinting) {
+        if (this.skillActive) {
+            this.player.setTint(0xffff44);
+        } else if (this.sprinting) {
             this.player.setTint(0x88ccff);
         } else {
             this.player.clearTint();
+        }
+
+        // ── Skill move ──
+        this.skillCooldown = Math.max(0, this.skillCooldown - delta);
+        this.skillTimer = Math.max(0, this.skillTimer - delta);
+        if (this.skillTimer <= 0) this.skillActive = false;
+
+        if (Phaser.Input.Keyboard.JustDown(this.skillKey)) {
+            this.performSkill();
+        }
+
+        // ── Skill cooldown indicator ──
+        this.skillGfx.clear();
+        if (this.skillCooldown > 0) {
+            this.skillLabel.setColor('#666666');
+            // draw cooldown sweep
+            const cdPct = this.skillCooldown / 2000;
+            this.skillGfx.fillStyle(0x000000, 0.5);
+            this.skillGfx.fillRoundedRect(138, GAME_H - STAND_H + 22, 18, 16, 3);
+            this.skillGfx.fillStyle(0x666666, 0.5);
+            this.skillGfx.fillRoundedRect(138, GAME_H - STAND_H + 22 + 16 * (1 - cdPct), 18, 16 * cdPct, 3);
+        } else {
+            this.skillLabel.setColor('#44ff88');
+            this.skillGfx.fillStyle(0x44ff88, 0.2);
+            this.skillGfx.fillRoundedRect(138, GAME_H - STAND_H + 22, 18, 16, 3);
         }
 
         // ── Shoot (hold to charge, release to fire) ──
@@ -1516,18 +1673,18 @@ class DribbleScene extends Phaser.Scene {
         // ── Defender AI ──
         const defSpeed = this.getDefenderSpeed();
         this.defenders.getChildren().forEach(def => {
+            if (def.getData('stunned')) return; // skip stunned defenders
+
             const dist = Phaser.Math.Distance.Between(def.x, def.y, this.player.x, this.player.y);
             const chaseRange = def.getData('chaseRange');
 
             if (dist < chaseRange) {
-                // chase player
                 const angle = Phaser.Math.Angle.Between(def.x, def.y, this.player.x, this.player.y);
                 def.body.setVelocity(
                     Math.cos(angle) * defSpeed,
                     Math.sin(angle) * defSpeed
                 );
             } else {
-                // drift back toward home position
                 const homeX = def.getData('homeX');
                 const homeY = def.getData('homeY');
                 const homeDist = Phaser.Math.Distance.Between(def.x, def.y, homeX, homeY);
@@ -1544,21 +1701,21 @@ class DribbleScene extends Phaser.Scene {
         });
 
         // ── Goalkeeper AI — patrols in front of the goal ──
-        const goalTop = GAME_H / 2 - 55;
-        const goalBot = GAME_H / 2 + 55;
-        const ky = this.keeper.y;
+        if (!this.keeper.getData('stunned')) {
+            const goalTop = GAME_H / 2 - 55;
+            const goalBot = GAME_H / 2 + 55;
+            const ky = this.keeper.y;
 
-        if (ky <= goalTop) this.keeperDir = 1;
-        if (ky >= goalBot) this.keeperDir = -1;
+            if (ky <= goalTop) this.keeperDir = 1;
+            if (ky >= goalBot) this.keeperDir = -1;
 
-        // react to ball if shot is in flight
-        if (this.shotFired) {
-            // move toward ball's y position
-            const diff = this.dribbleBall.y - ky;
-            const reactSpeed = this.keeperSpeed * 1.8;
-            this.keeper.body.setVelocityY(Phaser.Math.Clamp(diff * 5, -reactSpeed, reactSpeed));
-        } else {
-            this.keeper.body.setVelocityY(this.keeperDir * this.keeperSpeed);
+            if (this.shotFired) {
+                const diff = this.dribbleBall.y - ky;
+                const reactSpeed = this.keeperSpeed * 1.8;
+                this.keeper.body.setVelocityY(Phaser.Math.Clamp(diff * 5, -reactSpeed, reactSpeed));
+            } else {
+                this.keeper.body.setVelocityY(this.keeperDir * this.keeperSpeed);
+            }
         }
 
         // ── HUD ──
