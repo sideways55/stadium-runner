@@ -10,29 +10,257 @@ const LEVEL_LENGTH = 3000;   // pixels the player must travel per level
 const PLAYER_SPEED = 160;
 const AUTO_SCROLL = 100;     // base auto-scroll px/s
 
+// ── Sound FX (Web Audio synthesis) ─────────────────────────────────
+class SoundFX {
+    constructor() {
+        this.ctx = null;
+        this.muted = false;
+    }
+
+    init() {
+        try {
+            this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        } catch (e) {
+            console.warn('Web Audio not available');
+        }
+    }
+
+    ensure() {
+        if (!this.ctx) this.init();
+        if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    }
+
+    // short percussive kick sound
+    kick() {
+        this.ensure();
+        if (!this.ctx || this.muted) return;
+        const t = this.ctx.currentTime;
+        // thwack — noise burst + low thump
+        const g = this.ctx.createGain();
+        g.connect(this.ctx.destination);
+        g.gain.setValueAtTime(0.4, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+
+        const osc = this.ctx.createOscillator();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(200, t);
+        osc.frequency.exponentialRampToValueAtTime(80, t + 0.1);
+        osc.connect(g);
+        osc.start(t);
+        osc.stop(t + 0.15);
+
+        // click layer
+        const g2 = this.ctx.createGain();
+        g2.connect(this.ctx.destination);
+        g2.gain.setValueAtTime(0.3, t);
+        g2.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+        const osc2 = this.ctx.createOscillator();
+        osc2.type = 'square';
+        osc2.frequency.setValueAtTime(800, t);
+        osc2.frequency.exponentialRampToValueAtTime(200, t + 0.06);
+        osc2.connect(g2);
+        osc2.start(t);
+        osc2.stop(t + 0.06);
+    }
+
+    // getting hit — harsh buzz
+    hit() {
+        this.ensure();
+        if (!this.ctx || this.muted) return;
+        const t = this.ctx.currentTime;
+
+        const g = this.ctx.createGain();
+        g.connect(this.ctx.destination);
+        g.gain.setValueAtTime(0.35, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, t);
+        osc.frequency.exponentialRampToValueAtTime(40, t + 0.4);
+        osc.connect(g);
+        osc.start(t);
+        osc.stop(t + 0.4);
+
+        // noise-like crunch
+        const g2 = this.ctx.createGain();
+        g2.connect(this.ctx.destination);
+        g2.gain.setValueAtTime(0.2, t);
+        g2.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+        const osc2 = this.ctx.createOscillator();
+        osc2.type = 'square';
+        osc2.frequency.setValueAtTime(90, t);
+        osc2.connect(g2);
+        osc2.start(t);
+        osc2.stop(t + 0.2);
+    }
+
+    // ball landing — soft bounce thud
+    bounce() {
+        this.ensure();
+        if (!this.ctx || this.muted) return;
+        const t = this.ctx.currentTime;
+
+        const g = this.ctx.createGain();
+        g.connect(this.ctx.destination);
+        g.gain.setValueAtTime(0.15, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(300, t);
+        osc.frequency.exponentialRampToValueAtTime(100, t + 0.1);
+        osc.connect(g);
+        osc.start(t);
+        osc.stop(t + 0.12);
+    }
+
+    // whoosh — ball incoming
+    whoosh() {
+        this.ensure();
+        if (!this.ctx || this.muted) return;
+        const t = this.ctx.currentTime;
+
+        // filtered noise via oscillator detuning
+        const g = this.ctx.createGain();
+        g.connect(this.ctx.destination);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.08, t + 0.05);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(600, t);
+        osc.frequency.exponentialRampToValueAtTime(200, t + 0.25);
+        osc.connect(g);
+        osc.start(t);
+        osc.stop(t + 0.25);
+    }
+
+    // level complete — ascending arpeggio
+    levelUp() {
+        this.ensure();
+        if (!this.ctx || this.muted) return;
+        const t = this.ctx.currentTime;
+        const notes = [523, 659, 784, 1047]; // C5, E5, G5, C6
+
+        notes.forEach((freq, i) => {
+            const g = this.ctx.createGain();
+            g.connect(this.ctx.destination);
+            const start = t + i * 0.12;
+            g.gain.setValueAtTime(0.2, start);
+            g.gain.exponentialRampToValueAtTime(0.001, start + 0.3);
+
+            const osc = this.ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, start);
+            osc.connect(g);
+            osc.start(start);
+            osc.stop(start + 0.3);
+        });
+    }
+
+    // menu select — quick blip
+    select() {
+        this.ensure();
+        if (!this.ctx || this.muted) return;
+        const t = this.ctx.currentTime;
+
+        const g = this.ctx.createGain();
+        g.connect(this.ctx.destination);
+        g.gain.setValueAtTime(0.2, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, t);
+        osc.frequency.setValueAtTime(1100, t + 0.04);
+        osc.connect(g);
+        osc.start(t);
+        osc.stop(t + 0.1);
+    }
+
+    // points scored — cheerful ding
+    points() {
+        this.ensure();
+        if (!this.ctx || this.muted) return;
+        const t = this.ctx.currentTime;
+
+        const g = this.ctx.createGain();
+        g.connect(this.ctx.destination);
+        g.gain.setValueAtTime(0.18, t);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1200, t);
+        osc.connect(g);
+        osc.start(t);
+        osc.stop(t + 0.2);
+    }
+}
+
+const sfx = new SoundFX();
+
 // ── Boot Scene ─────────────────────────────────────────────────────
 class BootScene extends Phaser.Scene {
     constructor() { super('Boot'); }
 
     create() {
+        sfx.init();
         this.generateTextures();
         this.scene.start('Title');
     }
 
     generateTextures() {
-        // — Player (simple character) —
+        // — Player: kick ready (bright jersey with glow outline) —
         const pg = this.make.graphics({ add: false });
+        pg.fillStyle(0x44aaff, 0.3);
+        pg.fillRoundedRect(0, 0, 28, 36, 6);   // glow outline
         pg.fillStyle(0x2255ff);
-        pg.fillRoundedRect(2, 2, 20, 28, 4);
+        pg.fillRoundedRect(2, 2, 24, 32, 4);
         pg.fillStyle(0xffcc88);
-        pg.fillCircle(12, 6, 6);         // head
+        pg.fillCircle(14, 8, 7);         // head
         pg.fillStyle(0xff4444);
-        pg.fillRect(6, 14, 12, 10);      // jersey
+        pg.fillRect(7, 16, 14, 10);      // jersey
         pg.fillStyle(0x222222);
-        pg.fillRect(6, 24, 5, 6);        // left leg
-        pg.fillRect(13, 24, 5, 6);       // right leg
-        pg.generateTexture('player', 24, 32);
+        pg.fillRect(7, 26, 6, 8);        // left leg
+        pg.fillRect(15, 26, 6, 8);       // right leg
+        pg.generateTexture('player_ready', 28, 36);
         pg.destroy();
+
+        // — Player: cooldown (dimmer jersey, no glow) —
+        const pc = this.make.graphics({ add: false });
+        pc.fillStyle(0x1a1a44);
+        pc.fillRoundedRect(2, 2, 24, 32, 4);
+        pc.fillStyle(0xddbb88);
+        pc.fillCircle(14, 8, 7);         // head
+        pc.fillStyle(0x993333);
+        pc.fillRect(7, 16, 14, 10);      // jersey (dimmer)
+        pc.fillStyle(0x222222);
+        pc.fillRect(7, 26, 6, 8);        // left leg
+        pc.fillRect(15, 26, 6, 8);       // right leg
+        pc.generateTexture('player_cooldown', 28, 36);
+        pc.destroy();
+
+        // — Player: kicking (right leg extended out) —
+        const pk = this.make.graphics({ add: false });
+        pk.fillStyle(0x44ff88, 0.4);
+        pk.fillRoundedRect(0, 0, 36, 36, 6);   // kick glow
+        pk.fillStyle(0x2255ff);
+        pk.fillRoundedRect(2, 2, 24, 32, 4);
+        pk.fillStyle(0xffcc88);
+        pk.fillCircle(14, 8, 7);         // head
+        pk.fillStyle(0xff4444);
+        pk.fillRect(7, 16, 14, 10);      // jersey
+        pk.fillStyle(0x222222);
+        pk.fillRect(7, 26, 6, 8);        // left leg (standing)
+        pk.fillStyle(0x333333);
+        pk.fillRect(20, 22, 14, 5);      // right leg extended out
+        pk.fillStyle(0xffffff);
+        pk.fillRect(32, 21, 4, 7);       // shoe/foot
+        pk.generateTexture('player_kick', 38, 36);
+        pk.destroy();
 
         // — Soccer ball —
         const bg = this.make.graphics({ add: false });
@@ -109,14 +337,14 @@ class TitleScene extends Phaser.Scene {
         }).setOrigin(0.5);
 
         // High score
-        const hi = localStorage.getItem('stadiumRunner_hi') || 0;
-        this.add.text(GAME_W / 2, 210, `High Score: Level ${hi}`, {
+        const hi = localStorage.getItem('stadiumRunner_hiScore') || 0;
+        this.add.text(GAME_W / 2, 210, `High Score: ${hi}`, {
             fontSize: '20px', fontFamily: 'Arial',
             color: '#ffdd44',
         }).setOrigin(0.5);
 
         // Instructions
-        const inst = this.add.text(GAME_W / 2, 320, 'Arrow Keys / WASD to move\nTouch & drag on mobile', {
+        const inst = this.add.text(GAME_W / 2, 320, 'Arrow Keys / WASD to move\nSPACE to kick balls back\nTouch & drag on mobile', {
             fontSize: '16px', fontFamily: 'Arial',
             color: '#aaddaa', align: 'center', lineSpacing: 6,
         }).setOrigin(0.5);
@@ -155,6 +383,7 @@ class TitleScene extends Phaser.Scene {
     }
 
     startGame() {
+        sfx.select();
         this.scene.start('Game', { level: 1 });
     }
 }
@@ -165,6 +394,7 @@ class GameScene extends Phaser.Scene {
 
     init(data) {
         this.level = data.level || 1;
+        this.score = data.score || 0;
         this.distance = 0;
         this.alive = true;
     }
@@ -187,9 +417,14 @@ class GameScene extends Phaser.Scene {
         this.drawStands(worldW);
 
         // ── Player ──
-        this.player = this.physics.add.sprite(80, GAME_H / 2, 'player')
+        this.player = this.physics.add.sprite(80, GAME_H / 2, 'player_ready')
             .setDepth(10).setCollideWorldBounds(true);
-        this.player.body.setSize(16, 24).setOffset(4, 6);
+        this.player.body.setSize(18, 26).setOffset(5, 8);
+        this.kickAnimTimer = 0;
+
+        // ── Kick-ready ring ──
+        this.kickRing = this.add.graphics().setDepth(9);
+        this.kickRingPulse = 0;
 
         // ── Camera follow ──
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
@@ -198,12 +433,17 @@ class GameScene extends Phaser.Scene {
         this.balls = this.physics.add.group();
         this.shadows = this.add.group();
 
+        // ── Kicked balls group ──
+        this.kickedBalls = this.physics.add.group();
+
         // ── Collision ──
         this.physics.add.overlap(this.player, this.balls, this.hitByBall, null, this);
 
         // ── Controls ──
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+        this.kickKey = this.input.keyboard.addKey('SPACE');
+        this.kickCooldown = 0;
         this.setupTouch();
 
         // ── HUD (fixed to camera) ──
@@ -237,15 +477,15 @@ class GameScene extends Phaser.Scene {
     // ── Difficulty scaling ──
     getSpawnInterval() {
         // ms between ball spawns – decreases with level
-        return Math.max(300, 1200 - (this.level - 1) * 120);
+        return Math.max(400, 1400 - (this.level - 1) * 100);
     }
 
     getBallSpeed() {
-        return 200 + (this.level - 1) * 30;
+        return 10 + (this.level - 1) * 8;
     }
 
     getSimultaneousBalls() {
-        return 1 + Math.floor(this.level * 0.6);
+        return 1 + Math.floor(this.level * 0.5);
     }
 
     // ── Field markings ──
@@ -324,6 +564,18 @@ class GameScene extends Phaser.Scene {
         this.hudDistText = this.add.text(GAME_W / 2, 26, '0%', {
             fontSize: '11px', fontFamily: 'Arial', color: '#ffffff',
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(102);
+
+        // Score display
+        this.hudScore = this.add.text(GAME_W - 10, STAND_H + 6, `Score: ${this.score}`, {
+            fontSize: '20px', fontFamily: 'Arial Black, Arial',
+            color: '#ffdd44', stroke: '#000000', strokeThickness: 4,
+        }).setOrigin(1, 0).setScrollFactor(0).setDepth(100);
+
+        // Kick hint
+        this.add.text(GAME_W / 2, GAME_H - STAND_H + 6, 'SPACE to kick', {
+            fontSize: '12px', fontFamily: 'Arial',
+            color: '#aaaaaa',
+        }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
     }
 
     updateHUD() {
@@ -332,6 +584,7 @@ class GameScene extends Phaser.Scene {
         this.hudBarFill.fillStyle(0x44dd66);
         this.hudBarFill.fillRoundedRect(GAME_W / 2 - 118, 8, 236 * pct, 12, 3);
         this.hudDistText.setText(`${Math.floor(pct * 100)}%`);
+        this.hudScore.setText(`Score: ${this.score}`);
     }
 
     // ── Level banner ──
@@ -385,9 +638,10 @@ class GameScene extends Phaser.Scene {
         ball.setScale(0.6);
 
         this.balls.add(ball);
+        sfx.whoosh();
 
-        // arc tween — ball flies in an arc from stands to field
-        const flightTime = Phaser.Math.Between(600, 900) / (1 + (this.level - 1) * 0.1);
+        // arc tween — consistent flight time per level
+        const flightTime = 2200 / (1 + (this.level - 1) * 0.05);
 
         // rise phase (ball appears to go up, gets bigger)
         this.tweens.add({
@@ -417,10 +671,11 @@ class GameScene extends Phaser.Scene {
                     onComplete: () => {
                         ball.setData('landed', true);
                         shadow.setAlpha(0.3);
+                        sfx.bounce();
 
                         // ball rolls on field after landing
                         const angle = Phaser.Math.Angle.Between(spawnX, spawnY, targetX, targetY);
-                        const rollSpeed = speed * 0.5;
+                        const rollSpeed = speed * 0.35;
                         ball.body.setVelocity(
                             Math.cos(angle) * rollSpeed,
                             Math.sin(angle) * rollSpeed
@@ -449,6 +704,80 @@ class GameScene extends Phaser.Scene {
         ball.body.enable = true;
     }
 
+    // ── Kick mechanic ──
+    tryKick() {
+        if (!this.alive || this.kickCooldown > 0) return;
+
+        this.kickCooldown = 300; // ms cooldown
+
+        const kickRange = 40;
+        const playerX = this.player.x;
+        const playerY = this.player.y;
+
+        let kicked = false;
+        this.balls.getChildren().slice().forEach(ball => {
+            const dist = Phaser.Math.Distance.Between(playerX, playerY, ball.x, ball.y);
+            if (dist < kickRange) {
+                kicked = true;
+                // remove from dangerous balls
+                this.balls.remove(ball);
+
+                // stop any tweens on this ball
+                this.tweens.killTweensOf(ball);
+
+                // kick it away from the player toward the stands
+                const kickAngle = Phaser.Math.Angle.Between(playerX, playerY, ball.x, ball.y);
+                const kickSpeed = 300;
+                ball.body.setVelocity(
+                    Math.cos(kickAngle) * kickSpeed,
+                    Math.sin(kickAngle) * kickSpeed
+                );
+                ball.setTint(0x44ff44);
+                this.kickedBalls.add(ball);
+
+                // points!
+                const points = 10 * this.level;
+                this.score += points;
+                this.showFloatingScore(ball.x, ball.y, points);
+                sfx.points();
+
+                // particle burst
+                this.starEmitter.emitParticleAt(ball.x, ball.y, 6);
+
+                // fade out kicked ball
+                this.time.delayedCall(600, () => {
+                    if (ball.active) {
+                        const sh = ball.getData('shadow');
+                        if (sh) sh.destroy();
+                        this.tweens.add({
+                            targets: ball, alpha: 0, duration: 200,
+                            onComplete: () => ball.destroy(),
+                        });
+                    }
+                });
+            }
+        });
+
+        if (kicked) {
+            sfx.kick();
+            this.kickAnimTimer = 150; // show kick pose for 150ms
+            this.cameras.main.shake(80, 0.005);
+        }
+    }
+
+    showFloatingScore(x, y, points) {
+        const txt = this.add.text(x, y, `+${points}`, {
+            fontSize: '22px', fontFamily: 'Arial Black, Arial',
+            color: '#ffff00', stroke: '#000000', strokeThickness: 3,
+        }).setOrigin(0.5).setDepth(150);
+
+        this.tweens.add({
+            targets: txt, y: y - 50, alpha: 0,
+            duration: 800, ease: 'Power2',
+            onComplete: () => txt.destroy(),
+        });
+    }
+
     // ── Collision ──
     hitByBall(player, ball) {
         if (!this.alive) return;
@@ -456,6 +785,7 @@ class GameScene extends Phaser.Scene {
         if (ball.y < FIELD_TOP + 5 || ball.y > FIELD_BOT - 5) return;
 
         this.alive = false;
+        sfx.hit();
 
         // effects
         this.hitEmitter.emitParticleAt(player.x, player.y, 20);
@@ -474,6 +804,7 @@ class GameScene extends Phaser.Scene {
                 level: this.level,
                 distance: Math.floor(this.distance),
                 pct: Math.floor((this.distance / LEVEL_LENGTH) * 100),
+                score: this.score,
             });
         });
     }
@@ -482,6 +813,7 @@ class GameScene extends Phaser.Scene {
     levelComplete() {
         if (!this.alive) return;
         this.alive = false;
+        sfx.levelUp();
 
         // celebration
         for (let i = 0; i < 5; i++) {
@@ -509,7 +841,7 @@ class GameScene extends Phaser.Scene {
         if (this.level > hi) localStorage.setItem('stadiumRunner_hi', this.level.toString());
 
         this.time.delayedCall(1800, () => {
-            this.scene.start('Game', { level: this.level + 1 });
+            this.scene.start('Game', { level: this.level + 1, score: this.score });
         });
     }
 
@@ -542,6 +874,31 @@ class GameScene extends Phaser.Scene {
         }
 
         this.player.body.setVelocity(vx, vy);
+
+        // ── Kick ──
+        this.kickCooldown = Math.max(0, this.kickCooldown - delta);
+        this.kickAnimTimer = Math.max(0, this.kickAnimTimer - delta);
+        if (Phaser.Input.Keyboard.JustDown(this.kickKey)) {
+            this.tryKick();
+        }
+
+        // ── Player texture swap + kick ring ──
+        this.kickRing.clear();
+        if (this.kickAnimTimer > 0) {
+            this.player.setTexture('player_kick');
+        } else if (this.kickCooldown > 0) {
+            this.player.setTexture('player_cooldown');
+        } else {
+            this.player.setTexture('player_ready');
+            // pulsing ring when kick is ready
+            this.kickRingPulse += delta * 0.006;
+            const pulse = 0.5 + 0.5 * Math.sin(this.kickRingPulse);
+            const radius = 22 + pulse * 6;
+            this.kickRing.lineStyle(2.5, 0x44ffaa, 0.4 + pulse * 0.5);
+            this.kickRing.strokeCircle(this.player.x, this.player.y, radius);
+            this.kickRing.lineStyle(1.5, 0xffffff, 0.2 + pulse * 0.3);
+            this.kickRing.strokeCircle(this.player.x, this.player.y, radius + 4);
+        }
 
         // ── Track distance ──
         this.distance += vx * dt;
@@ -588,10 +945,16 @@ class GameOverScene extends Phaser.Scene {
     init(data) {
         this.level = data.level || 1;
         this.pct = data.pct || 0;
+        this.finalScore = data.score || 0;
     }
 
     create() {
         this.cameras.main.setBackgroundColor('#220000');
+
+        // save high score
+        const prevHi = parseInt(localStorage.getItem('stadiumRunner_hiScore') || '0');
+        if (this.finalScore > prevHi) localStorage.setItem('stadiumRunner_hiScore', this.finalScore.toString());
+        const hiScore = Math.max(prevHi, this.finalScore);
 
         // dark overlay
         const g = this.add.graphics();
@@ -599,43 +962,79 @@ class GameOverScene extends Phaser.Scene {
         g.fillRect(0, 0, GAME_W, GAME_H);
 
         // Game over text
-        this.add.text(GAME_W / 2, 100, 'GAME OVER', {
+        this.add.text(GAME_W / 2, 80, 'GAME OVER', {
             fontSize: '52px', fontFamily: 'Arial Black, Arial',
             color: '#ff4444', stroke: '#000000', strokeThickness: 6,
         }).setOrigin(0.5);
 
         // ball hit icon
-        this.add.image(GAME_W / 2, 175, 'ball').setScale(3);
+        this.add.image(GAME_W / 2, 150, 'ball').setScale(3);
 
         // Stats
-        this.add.text(GAME_W / 2, 240, `Level: ${this.level}`, {
+        this.add.text(GAME_W / 2, 210, `Level: ${this.level}`, {
             fontSize: '28px', fontFamily: 'Arial', color: '#ffffff',
         }).setOrigin(0.5);
 
-        this.add.text(GAME_W / 2, 275, `Distance: ${this.pct}%`, {
-            fontSize: '22px', fontFamily: 'Arial', color: '#cccccc',
+        this.add.text(GAME_W / 2, 245, `Distance: ${this.pct}%`, {
+            fontSize: '20px', fontFamily: 'Arial', color: '#cccccc',
         }).setOrigin(0.5);
 
-        const hi = localStorage.getItem('stadiumRunner_hi') || 0;
-        this.add.text(GAME_W / 2, 320, `Best: Level ${hi}`, {
-            fontSize: '22px', fontFamily: 'Arial', color: '#ffdd44',
+        this.add.text(GAME_W / 2, 290, `Score: ${this.finalScore}`, {
+            fontSize: '30px', fontFamily: 'Arial Black, Arial', color: '#ffdd44',
         }).setOrigin(0.5);
 
-        // Retry prompt
-        const prompt = this.add.text(GAME_W / 2, 410, 'Press SPACE to Retry', {
-            fontSize: '24px', fontFamily: 'Arial', color: '#ffffff',
+        this.add.text(GAME_W / 2, 330, `Best Score: ${hiScore}`, {
+            fontSize: '20px', fontFamily: 'Arial', color: '#ffaa22',
         }).setOrigin(0.5);
 
-        this.tweens.add({
-            targets: prompt, alpha: 0.2,
-            duration: 600, yoyo: true, repeat: -1,
-        });
+        // ── Continue / Reset buttons ──
+        this.selected = 0; // 0 = continue, 1 = reset
+
+        const btnY = 385;
+        const btnStyle = { fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4 };
+
+        this.continueBtn = this.add.text(GAME_W / 2 - 120, btnY, `Continue (Lvl ${this.level})`, btnStyle).setOrigin(0.5);
+        this.resetBtn = this.add.text(GAME_W / 2 + 120, btnY, 'Reset (Lvl 1)', btnStyle).setOrigin(0.5);
+
+        this.add.text(GAME_W / 2, btnY + 40, 'Arrow Keys to choose, SPACE to select', {
+            fontSize: '13px', fontFamily: 'Arial', color: '#999999',
+        }).setOrigin(0.5);
+
+        this.updateSelection();
 
         // Input — slight delay to prevent accidental skip
         this.time.delayedCall(500, () => {
-            this.input.keyboard.once('keydown-SPACE', () => this.scene.start('Game', { level: 1 }));
-            this.input.once('pointerdown', () => this.scene.start('Game', { level: 1 }));
+            this.input.keyboard.on('keydown-LEFT', () => { this.selected = 0; this.updateSelection(); });
+            this.input.keyboard.on('keydown-RIGHT', () => { this.selected = 1; this.updateSelection(); });
+            this.input.keyboard.on('keydown-A', () => { this.selected = 0; this.updateSelection(); });
+            this.input.keyboard.on('keydown-D', () => { this.selected = 1; this.updateSelection(); });
+            this.input.keyboard.on('keydown-SPACE', () => this.confirmSelection());
+
+            // Click/tap buttons
+            this.continueBtn.setInteractive({ useHandCursor: true });
+            this.resetBtn.setInteractive({ useHandCursor: true });
+            this.continueBtn.on('pointerdown', () => { this.selected = 0; this.confirmSelection(); });
+            this.resetBtn.on('pointerdown', () => { this.selected = 1; this.confirmSelection(); });
         });
+    }
+
+    updateSelection() {
+        if (this.selected === 0) {
+            this.continueBtn.setColor('#44ff88').setScale(1.15);
+            this.resetBtn.setColor('#888888').setScale(1);
+        } else {
+            this.continueBtn.setColor('#888888').setScale(1);
+            this.resetBtn.setColor('#44ff88').setScale(1.15);
+        }
+    }
+
+    confirmSelection() {
+        sfx.select();
+        if (this.selected === 0) {
+            this.scene.start('Game', { level: this.level, score: this.finalScore });
+        } else {
+            this.scene.start('Game', { level: 1, score: 0 });
+        }
     }
 }
 
