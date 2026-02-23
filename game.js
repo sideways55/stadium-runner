@@ -310,18 +310,76 @@ const CLUBS = [
 ];
 
 const ProfileManager = {
-    PROFILE_KEY: 'stadium_profile',
+    PROFILE_KEY: 'stadium_profile',        // legacy single-profile key
+    PROFILES_KEY: 'stadium_profiles',      // array of all profiles
+    ACTIVE_KEY: 'stadium_active_id',       // active profile id
     LEADERBOARD_KEY: 'stadium_leaderboard',
     MAX_ENTRIES: 10,
 
+    migrateIfNeeded() {
+        const legacy = localStorage.getItem(this.PROFILE_KEY);
+        if (legacy && !localStorage.getItem(this.PROFILES_KEY)) {
+            const old = JSON.parse(legacy);
+            old.id = Date.now();
+            localStorage.setItem(this.PROFILES_KEY, JSON.stringify([old]));
+            localStorage.setItem(this.ACTIVE_KEY, String(old.id));
+            localStorage.removeItem(this.PROFILE_KEY);
+        }
+        this.dedupeLeaderboard();
+    },
+    dedupeLeaderboard() {
+        const lb = this.getLeaderboard();
+        let changed = false;
+        for (const mode of Object.keys(lb)) {
+            const best = {};
+            for (const entry of lb[mode]) {
+                if (!best[entry.name] || entry.score > best[entry.name].score) {
+                    best[entry.name] = entry;
+                }
+            }
+            const deduped = Object.values(best).sort((a, b) => b.score - a.score);
+            if (deduped.length !== lb[mode].length) changed = true;
+            lb[mode] = deduped;
+        }
+        if (changed) {
+            localStorage.setItem(this.LEADERBOARD_KEY, JSON.stringify(lb));
+        }
+    },
+    getAllProfiles() {
+        const raw = localStorage.getItem(this.PROFILES_KEY);
+        return raw ? JSON.parse(raw) : [];
+    },
     getProfile() {
-        const raw = localStorage.getItem(this.PROFILE_KEY);
-        return raw ? JSON.parse(raw) : null;
+        const id = this.getActiveId();
+        if (id === null) return null;
+        return this.getAllProfiles().find(p => p.id === id) || null;
+    },
+    getActiveId() {
+        const raw = localStorage.getItem(this.ACTIVE_KEY);
+        return raw ? Number(raw) : null;
     },
     saveProfile(profile) {
-        localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile));
+        if (!profile.id) profile.id = Date.now();
+        const profiles = this.getAllProfiles();
+        const idx = profiles.findIndex(p => p.id === profile.id);
+        if (idx >= 0) profiles[idx] = profile;
+        else profiles.push(profile);
+        localStorage.setItem(this.PROFILES_KEY, JSON.stringify(profiles));
+    },
+    setActive(id) {
+        localStorage.setItem(this.ACTIVE_KEY, String(id));
+    },
+    deleteProfile(id) {
+        let profiles = this.getAllProfiles().filter(p => p.id !== id);
+        localStorage.setItem(this.PROFILES_KEY, JSON.stringify(profiles));
+        if (this.getActiveId() === id) {
+            localStorage.removeItem(this.ACTIVE_KEY);
+        }
     },
     hasProfile() {
+        return this.getAllProfiles().length > 0;
+    },
+    hasActiveProfile() {
         return this.getProfile() !== null;
     },
     getLeaderboard() {
@@ -342,7 +400,13 @@ const ProfileManager = {
             date: new Date().toISOString().split('T')[0],
         };
         if (!lb[mode]) lb[mode] = [];
-        lb[mode].push(entry);
+        const existing = lb[mode].findIndex(e => e.name === profile.name);
+        if (existing >= 0) {
+            if (entry.score <= lb[mode][existing].score) return; // not a new best
+            lb[mode][existing] = entry;
+        } else {
+            lb[mode].push(entry);
+        }
         lb[mode].sort((a, b) => b.score - a.score);
         lb[mode] = lb[mode].slice(0, this.MAX_ENTRIES);
         localStorage.setItem(this.LEADERBOARD_KEY, JSON.stringify(lb));
@@ -359,10 +423,15 @@ class BootScene extends Phaser.Scene {
     create() {
         sfx.init();
         this.generateTextures();
-        if (ProfileManager.hasProfile()) {
+        ProfileManager.migrateIfNeeded();
+        const profiles = ProfileManager.getAllProfiles();
+        if (profiles.length === 0) {
+            this.scene.start('Profile');
+        } else if (profiles.length === 1) {
+            ProfileManager.setActive(profiles[0].id);
             this.scene.start('Title');
         } else {
-            this.scene.start('Profile');
+            this.scene.start('ProfileSelect');
         }
     }
 
@@ -530,6 +599,141 @@ class BootScene extends Phaser.Scene {
         }
         gp.generateTexture('goal', 40, 120);
         gp.destroy();
+    }
+}
+
+// ── Profile Select Scene ──────────────────────────────────────────
+class ProfileSelectScene extends Phaser.Scene {
+    constructor() { super('ProfileSelect'); }
+
+    create() {
+        this.cameras.main.setBackgroundColor('#1a2a4a');
+        this.profiles = ProfileManager.getAllProfiles();
+        this.selected = 0; // index in the display list (profiles + "NEW PLAYER")
+        this.deleteHeld = false;
+        this.deleteTimer = null;
+
+        this.add.text(GAME_W / 2, 35, 'SELECT PLAYER', {
+            fontSize: '36px', fontFamily: 'Arial Black, Arial',
+            color: '#ffffff', stroke: '#000000', strokeThickness: 5,
+        }).setOrigin(0.5);
+
+        this.listContainer = this.add.container(0, 0);
+        this.cursorGfx = this.add.graphics();
+        this.buildList();
+
+        this.add.text(GAME_W / 2, GAME_H - 50, 'UP/DOWN to navigate  |  SPACE to select', {
+            fontSize: '14px', fontFamily: 'Arial', color: '#aaaaaa',
+        }).setOrigin(0.5);
+        this.deleteHint = this.add.text(GAME_W / 2, GAME_H - 28, 'Hold BACKSPACE to delete selected profile', {
+            fontSize: '12px', fontFamily: 'Arial', color: '#666666',
+        }).setOrigin(0.5);
+
+        this.input.keyboard.on('keydown-UP', () => { this.selected = Math.max(0, this.selected - 1); this.updateList(); });
+        this.input.keyboard.on('keydown-DOWN', () => { this.selected = Math.min(this.profiles.length, this.selected + 1); this.updateList(); });
+        this.input.keyboard.on('keydown-W', () => { this.selected = Math.max(0, this.selected - 1); this.updateList(); });
+        this.input.keyboard.on('keydown-S', () => { this.selected = Math.min(this.profiles.length, this.selected + 1); this.updateList(); });
+        this.input.keyboard.on('keydown-SPACE', () => this.confirmSelection());
+        this.input.keyboard.on('keydown-BACKSPACE', () => this.startDelete());
+        this.input.keyboard.on('keyup-BACKSPACE', () => this.cancelDelete());
+    }
+
+    buildList() {
+        this.listContainer.removeAll(true);
+        this.itemTexts = [];
+        const startY = 100;
+        const rowH = 50;
+        const maxVisible = 7;
+        const count = this.profiles.length + 1; // +1 for NEW PLAYER
+
+        for (let i = 0; i < Math.min(count, maxVisible); i++) {
+            const y = startY + i * rowH;
+            if (i < this.profiles.length) {
+                const p = this.profiles[i];
+                const flag = getFlag(p.country);
+                const txt = this.add.text(GAME_W / 2, y, `${flag}  ${p.name}  —  ${p.club}`, {
+                    fontSize: '20px', fontFamily: 'Arial Black, Arial', color: '#888888',
+                }).setOrigin(0.5);
+                this.itemTexts.push(txt);
+                this.listContainer.add(txt);
+            } else {
+                const txt = this.add.text(GAME_W / 2, y, '+ NEW PLAYER', {
+                    fontSize: '20px', fontFamily: 'Arial Black, Arial', color: '#888888',
+                }).setOrigin(0.5);
+                this.itemTexts.push(txt);
+                this.listContainer.add(txt);
+            }
+        }
+        this.updateList();
+    }
+
+    updateList() {
+        const count = this.profiles.length + 1;
+        if (this.selected >= count) this.selected = count - 1;
+
+        this.itemTexts.forEach((txt, i) => {
+            if (i === this.selected) {
+                txt.setColor(i === this.profiles.length ? '#44aaff' : '#44ff88').setScale(1.1);
+            } else {
+                txt.setColor('#888888').setScale(1);
+            }
+        });
+
+        this.cursorGfx.clear();
+        if (this.selected < this.itemTexts.length) {
+            const target = this.itemTexts[this.selected];
+            this.cursorGfx.lineStyle(2, 0x44ff88, 0.8);
+            const w = target.width * target.scaleX + 30;
+            this.cursorGfx.strokeRoundedRect(target.x - w / 2, target.y - 18, w, 36, 5);
+        }
+
+        // show/hide delete hint based on whether a profile (not NEW PLAYER) is selected
+        if (this.deleteHint) {
+            this.deleteHint.setVisible(this.selected < this.profiles.length);
+        }
+    }
+
+    confirmSelection() {
+        sfx.select();
+        if (this.selected < this.profiles.length) {
+            ProfileManager.setActive(this.profiles[this.selected].id);
+            this.scene.start('Title');
+        } else {
+            this.scene.start('Profile', { returnTo: 'ProfileSelect' });
+        }
+    }
+
+    startDelete() {
+        if (this.selected >= this.profiles.length) return; // can't delete NEW PLAYER
+        if (this.deleteTimer) return;
+        this.deleteHeld = true;
+        // visual feedback — flash the selected item red
+        const target = this.itemTexts[this.selected];
+        if (target) target.setColor('#ff4444');
+        this.deleteTimer = this.time.delayedCall(800, () => {
+            if (this.deleteHeld) {
+                const p = this.profiles[this.selected];
+                ProfileManager.deleteProfile(p.id);
+                this.profiles = ProfileManager.getAllProfiles();
+                if (this.profiles.length === 0) {
+                    this.scene.start('Profile');
+                    return;
+                }
+                this.selected = Math.min(this.selected, this.profiles.length);
+                sfx.select();
+                this.buildList();
+            }
+            this.deleteTimer = null;
+        });
+    }
+
+    cancelDelete() {
+        this.deleteHeld = false;
+        if (this.deleteTimer) {
+            this.deleteTimer.remove(false);
+            this.deleteTimer = null;
+        }
+        this.updateList();
     }
 }
 
@@ -995,11 +1199,14 @@ class ProfileScene extends Phaser.Scene {
     }
 
     finishProfile(clubName) {
-        ProfileManager.saveProfile({
+        const profile = {
+            id: this.existingProfile ? this.existingProfile.id : Date.now(),
             name: this.currentName.trim(),
             country: this.selectedCountry,
             club: clubName,
-        });
+        };
+        ProfileManager.saveProfile(profile);
+        ProfileManager.setActive(profile.id);
         sfx.levelUp();
         this.scene.start(this.returnTo);
     }
@@ -1091,7 +1298,7 @@ class LeaderboardScene extends Phaser.Scene {
 
         // mode tabs
         this.modes = ['dodgeball', 'dribble', 'penalties'];
-        this.modeLabels = ['DODGEBALL', 'DRIBBLE', 'PENALTIES'];
+        this.modeLabels = ['DODGEBALL', 'ANKLE BREAKERS', 'PANENKA'];
         this.selectedMode = 0;
         this.tabTexts = [];
 
@@ -1219,18 +1426,12 @@ class TitleScene extends Phaser.Scene {
         // Mode buttons
         this.selected = 0;
         const btnStyle = { fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 5 };
-        const descStyle = { fontSize: '11px', fontFamily: 'Arial', color: '#aaddaa', align: 'center' };
 
         this.modeBtns = [];
-        this.modeDescs = [];
+        this.modeIcons = [];
 
         const modeX = [GAME_W / 2 - 260, GAME_W / 2, GAME_W / 2 + 260];
-        const names = ['Dodgeball', 'Dribble', 'Penalties'];
-        const descs = [
-            'Run through the stadium\ndodging soccer balls\nSPACE to kick them back',
-            'Dribble past defenders\nand score a goal\nMore defenders each level',
-            'Penalty shootout!\nShoot then save\nBest of 5 rounds',
-        ];
+        const names = ['Dodgeball', 'Ankle Breakers', 'Panenka'];
 
         const hiDodge = localStorage.getItem('stadiumRunner_hiScore') || 0;
         const hiDribble = localStorage.getItem('dribble_hiLevel') || 0;
@@ -1238,9 +1439,60 @@ class TitleScene extends Phaser.Scene {
         const hiLabels = [`Best: ${hiDodge} pts`, `Best: Level ${hiDribble}`, `Best: ${hiPen} pts`];
 
         for (let i = 0; i < 3; i++) {
-            this.modeBtns.push(this.add.text(modeX[i], 210, names[i], btnStyle).setOrigin(0.5));
-            this.modeDescs.push(this.add.text(modeX[i], 245, descs[i], descStyle).setOrigin(0.5));
-            this.add.text(modeX[i], 290, hiLabels[i], { fontSize: '13px', fontFamily: 'Arial', color: '#ffdd44' }).setOrigin(0.5);
+            this.modeBtns.push(this.add.text(modeX[i], 230, names[i], btnStyle).setOrigin(0.5));
+            this.add.text(modeX[i], 265, hiLabels[i], { fontSize: '13px', fontFamily: 'Arial', color: '#ffdd44' }).setOrigin(0.5);
+        }
+
+        // mode icons
+        this.modeIcons = [];
+        for (let i = 0; i < 3; i++) {
+            const ig = this.add.graphics().setDepth(5);
+            const cx = modeX[i], cy = 175;
+            if (i === 0) {
+                // Dodgeball — multiple balls flying
+                ig.fillStyle(0xffffff); ig.fillCircle(cx - 18, cy - 5, 7);
+                ig.fillStyle(0x222222); ig.fillCircle(cx - 18, cy - 5, 4);
+                ig.fillStyle(0xffffff); ig.fillCircle(cx + 2, cy - 12, 7);
+                ig.fillStyle(0x222222); ig.fillCircle(cx + 2, cy - 12, 4);
+                ig.fillStyle(0xffffff); ig.fillCircle(cx + 18, cy + 2, 7);
+                ig.fillStyle(0x222222); ig.fillCircle(cx + 18, cy + 2, 4);
+                // motion lines
+                ig.lineStyle(2, 0xffaa44, 0.6);
+                ig.moveTo(cx - 30, cy - 3); ig.lineTo(cx - 38, cy - 1); ig.strokePath();
+                ig.moveTo(cx - 10, cy - 12); ig.lineTo(cx - 18, cy - 14); ig.strokePath();
+                ig.moveTo(cx + 8, cy + 4); ig.lineTo(cx + 2, cy + 6); ig.strokePath();
+            } else if (i === 1) {
+                // Ankle Breakers — player dribbling past defender
+                // player (blue)
+                ig.fillStyle(0x2255ff); ig.fillRoundedRect(cx - 22, cy - 12, 14, 20, 3);
+                ig.fillStyle(0xffcc88); ig.fillCircle(cx - 15, cy - 14, 5);
+                // ball at feet
+                ig.fillStyle(0xffffff); ig.fillCircle(cx - 10, cy + 12, 5);
+                ig.fillStyle(0x222222); ig.fillCircle(cx - 10, cy + 12, 3);
+                // defender (red, stumbling)
+                ig.fillStyle(0xdd3333); ig.fillRoundedRect(cx + 8, cy - 8, 14, 20, 3);
+                ig.fillStyle(0xffcc88); ig.fillCircle(cx + 15, cy - 10, 5);
+                // dizzy stars (small diamonds)
+                ig.fillStyle(0xffff44, 0.8);
+                ig.fillCircle(cx + 24, cy - 16, 3);
+                ig.fillCircle(cx + 8, cy - 18, 2);
+            } else {
+                // Panenka — goal with ball in top corner
+                ig.lineStyle(3, 0xffffff, 0.8);
+                ig.strokeRect(cx - 25, cy - 15, 50, 30);
+                // net lines
+                ig.lineStyle(1, 0xcccccc, 0.25);
+                for (let nx = cx - 20; nx <= cx + 20; nx += 10) {
+                    ig.moveTo(nx, cy - 15); ig.lineTo(nx, cy + 15); ig.strokePath();
+                }
+                for (let ny = cy - 10; ny <= cy + 10; ny += 10) {
+                    ig.moveTo(cx - 25, ny); ig.lineTo(cx + 25, ny); ig.strokePath();
+                }
+                // ball in top corner
+                ig.fillStyle(0xffffff); ig.fillCircle(cx + 18, cy - 8, 6);
+                ig.fillStyle(0x222222); ig.fillCircle(cx + 18, cy - 8, 3);
+            }
+            this.modeIcons.push(ig);
         }
 
         // player profile display
@@ -1260,8 +1512,9 @@ class TitleScene extends Phaser.Scene {
         this.utilSelected = 0;
         const utilStyle = { fontSize: '18px', fontFamily: 'Arial Black, Arial', color: '#888888', stroke: '#000000', strokeThickness: 3 };
         this.utilBtns = [
-            this.add.text(GAME_W / 2 - 130, 340, 'Leaderboard', utilStyle).setOrigin(0.5),
-            this.add.text(GAME_W / 2 + 130, 340, 'Edit Profile', utilStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 - 240, 340, 'Leaderboard', utilStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2, 340, 'Edit Profile', utilStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 + 240, 340, 'Switch Player', utilStyle).setOrigin(0.5),
         ];
 
         // Controls hint
@@ -1285,7 +1538,7 @@ class TitleScene extends Phaser.Scene {
         });
         this.input.keyboard.on('keydown-RIGHT', () => {
             if (this.navRow === 0) this.selected = Math.min(2, this.selected + 1);
-            else this.utilSelected = Math.min(1, this.utilSelected + 1);
+            else this.utilSelected = Math.min(2, this.utilSelected + 1);
             this.updateAllSelections();
         });
         this.input.keyboard.on('keydown-A', () => {
@@ -1295,7 +1548,7 @@ class TitleScene extends Phaser.Scene {
         });
         this.input.keyboard.on('keydown-D', () => {
             if (this.navRow === 0) this.selected = Math.min(2, this.selected + 1);
-            else this.utilSelected = Math.min(1, this.utilSelected + 1);
+            else this.utilSelected = Math.min(2, this.utilSelected + 1);
             this.updateAllSelections();
         });
         this.input.keyboard.on('keydown-UP', () => { if (this.navRow === 1) { this.navRow = 0; this.updateAllSelections(); } });
@@ -1337,15 +1590,112 @@ class TitleScene extends Phaser.Scene {
 
     drawMiniStadium() {
         const g = this.add.graphics();
-        g.fillStyle(0x993333); g.fillRect(0, 0, GAME_W, STAND_H);
-        g.fillStyle(0x333399); g.fillRect(0, GAME_H - STAND_H, GAME_W, STAND_H);
-        g.fillStyle(0x2d8a4e); g.fillRect(0, STAND_H, GAME_W, FIELD_H);
-        for (let i = 0; i < 40; i++) {
-            const c = Phaser.Display.Color.HSVColorWheel()[Phaser.Math.Between(0, 359)];
-            g.fillStyle(c.color, 0.6);
-            g.fillCircle(Phaser.Math.Between(20, GAME_W - 20), Phaser.Math.Between(8, STAND_H - 8), 5);
-            g.fillCircle(Phaser.Math.Between(20, GAME_W - 20), Phaser.Math.Between(GAME_H - STAND_H + 8, GAME_H - 8), 5);
+        const pad = 30; // padding around the pitch
+        const fw = GAME_W - pad * 2; // field width
+        const fh = GAME_H - pad * 2; // field height
+        const fx = pad, fy = pad;
+
+        // grass base
+        g.fillStyle(0x2d8a4e);
+        g.fillRect(0, 0, GAME_W, GAME_H);
+
+        // mow stripes
+        const stripeW = fw / 12;
+        for (let i = 0; i < 12; i++) {
+            if (i % 2 === 0) {
+                g.fillStyle(0x33995a, 0.35);
+                g.fillRect(fx + i * stripeW, fy, stripeW, fh);
+            }
         }
+
+        // dark border around pitch
+        g.fillStyle(0x1a5e35);
+        g.fillRect(0, 0, GAME_W, fy);           // top strip
+        g.fillRect(0, fy + fh, GAME_W, pad);     // bottom strip
+        g.fillRect(0, 0, fx, GAME_H);            // left strip
+        g.fillRect(fx + fw, 0, pad, GAME_H);     // right strip
+
+        const lineAlpha = 0.35;
+        g.lineStyle(2, 0xffffff, lineAlpha);
+
+        // outer boundary
+        g.strokeRect(fx, fy, fw, fh);
+
+        // halfway line
+        g.moveTo(GAME_W / 2, fy);
+        g.lineTo(GAME_W / 2, fy + fh);
+        g.strokePath();
+
+        // center circle
+        g.beginPath();
+        g.arc(GAME_W / 2, GAME_H / 2, fh * 0.18, 0, Math.PI * 2);
+        g.strokePath();
+
+        // center spot
+        g.fillStyle(0xffffff, lineAlpha);
+        g.fillCircle(GAME_W / 2, GAME_H / 2, 3);
+
+        // left penalty box
+        const boxW = fw * 0.14;
+        const boxH = fh * 0.52;
+        const boxY = fy + (fh - boxH) / 2;
+        g.lineStyle(2, 0xffffff, lineAlpha);
+        g.strokeRect(fx, boxY, boxW, boxH);
+
+        // left goal box (6-yard)
+        const goalBoxW = boxW * 0.45;
+        const goalBoxH = boxH * 0.52;
+        const goalBoxY = fy + (fh - goalBoxH) / 2;
+        g.strokeRect(fx, goalBoxY, goalBoxW, goalBoxH);
+
+        // left penalty spot
+        g.fillStyle(0xffffff, lineAlpha);
+        g.fillCircle(fx + boxW * 0.75, GAME_H / 2, 2);
+
+        // left penalty arc
+        g.lineStyle(2, 0xffffff, lineAlpha);
+        g.beginPath();
+        g.arc(fx + boxW * 0.75, GAME_H / 2, fh * 0.18, Phaser.Math.DegToRad(-50), Phaser.Math.DegToRad(50), false);
+        g.strokePath();
+
+        // left goal
+        g.lineStyle(3, 0xffffff, lineAlpha * 1.5);
+        const goalH = fh * 0.2;
+        const goalY = fy + (fh - goalH) / 2;
+        g.strokeRect(fx - 8, goalY, 8, goalH);
+
+        // right penalty box
+        g.lineStyle(2, 0xffffff, lineAlpha);
+        g.strokeRect(fx + fw - boxW, boxY, boxW, boxH);
+
+        // right goal box (6-yard)
+        g.strokeRect(fx + fw - goalBoxW, goalBoxY, goalBoxW, goalBoxH);
+
+        // right penalty spot
+        g.fillStyle(0xffffff, lineAlpha);
+        g.fillCircle(fx + fw - boxW * 0.75, GAME_H / 2, 2);
+
+        // right penalty arc
+        g.lineStyle(2, 0xffffff, lineAlpha);
+        g.beginPath();
+        g.arc(fx + fw - boxW * 0.75, GAME_H / 2, fh * 0.18, Phaser.Math.DegToRad(130), Phaser.Math.DegToRad(230), false);
+        g.strokePath();
+
+        // right goal
+        g.lineStyle(3, 0xffffff, lineAlpha * 1.5);
+        g.strokeRect(fx + fw, goalY, 8, goalH);
+
+        // corner arcs
+        const cornerR = fh * 0.04;
+        g.lineStyle(2, 0xffffff, lineAlpha);
+        g.beginPath(); g.arc(fx, fy, cornerR, 0, Math.PI * 0.5); g.strokePath();
+        g.beginPath(); g.arc(fx + fw, fy, cornerR, Math.PI * 0.5, Math.PI); g.strokePath();
+        g.beginPath(); g.arc(fx, fy + fh, cornerR, Phaser.Math.DegToRad(270), Phaser.Math.DegToRad(360)); g.strokePath();
+        g.beginPath(); g.arc(fx + fw, fy + fh, cornerR, Math.PI, Phaser.Math.DegToRad(270)); g.strokePath();
+
+        // dark overlay so text is readable
+        g.fillStyle(0x000000, 0.45);
+        g.fillRect(0, 0, GAME_W, GAME_H);
     }
 
     startGame() {
@@ -1363,8 +1713,10 @@ class TitleScene extends Phaser.Scene {
         sfx.select();
         if (this.utilSelected === 0) {
             this.scene.start('Leaderboard');
-        } else {
+        } else if (this.utilSelected === 1) {
             this.scene.start('Profile', { returnTo: 'Title' });
+        } else {
+            this.scene.start('ProfileSelect');
         }
     }
 }
@@ -1557,6 +1909,15 @@ class GameScene extends Phaser.Scene {
             fontSize: '12px', fontFamily: 'Arial',
             color: '#aaaaaa',
         }).setOrigin(0.5, 0).setScrollFactor(0).setDepth(100);
+
+        // Menu button
+        const menuBtn = this.add.text(GAME_W - 10, 6, 'ESC MENU', {
+            fontSize: '12px', fontFamily: 'Arial Black, Arial',
+            color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+            backgroundColor: '#00000066', padding: { x: 6, y: 3 },
+        }).setOrigin(1, 0).setScrollFactor(0).setDepth(200).setInteractive({ useHandCursor: true });
+        menuBtn.on('pointerdown', () => this.scene.start('Title'));
+        this.input.keyboard.on('keydown-ESC', () => this.scene.start('Title'));
     }
 
     updateHUD() {
@@ -2051,6 +2412,15 @@ class DribbleScene extends Phaser.Scene {
             color: '#44ff88', stroke: '#000000', strokeThickness: 2,
         }).setDepth(101);
         this.skillGfx = this.add.graphics().setDepth(100);
+
+        // Menu button
+        const menuBtn = this.add.text(GAME_W - 10, 6, 'ESC MENU', {
+            fontSize: '12px', fontFamily: 'Arial Black, Arial',
+            color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+            backgroundColor: '#00000066', padding: { x: 6, y: 3 },
+        }).setOrigin(1, 0).setDepth(200).setInteractive({ useHandCursor: true });
+        menuBtn.on('pointerdown', () => this.scene.start('Title'));
+        this.input.keyboard.on('keydown-ESC', () => this.scene.start('Title'));
 
         // Shot power bar (drawn above player, only visible while charging)
         this.powerBarGfx = this.add.graphics().setDepth(150);
@@ -2628,6 +2998,9 @@ class PenaltyScene extends Phaser.Scene {
             lifespan: 400, blendMode: 'ADD', emitting: false,
         }).setDepth(50);
 
+        // ESC to menu
+        this.input.keyboard.on('keydown-ESC', () => this.scene.start('Title'));
+
         this.setupShootPhase();
     }
 
@@ -2673,39 +3046,52 @@ class PenaltyScene extends Phaser.Scene {
             }
         }
 
-        // perspective side lines
-        g.lineStyle(2, 0xffffff, 0.3);
-        g.moveTo(0, GAME_H); g.lineTo(vpX - 140, vpY + 30); g.strokePath();
-        g.moveTo(GAME_W, GAME_H); g.lineTo(vpX + 140, vpY + 30); g.strokePath();
+        // Perspective field lines — shooter's view looking at goal
+        // Real proportions: goal=7.32m, goal area=18.32m×5.5m,
+        // penalty area=40.32m×16.5m, penalty mark=11m from goal line,
+        // penalty arc=9.15m radius OUTSIDE penalty area, pitch=68m wide
+        const fieldBot = GAME_H;
+        const goalLineY = vpY + 30; // where the goal line sits on screen
 
-        // penalty box (perspective trapezoid)
+        // goal line — extends wide across screen
+        g.lineStyle(2, 0xffffff, 0.2);
+        g.beginPath(); g.moveTo(0, goalLineY); g.lineTo(GAME_W, goalLineY); g.strokePath();
+
+        // goal area (6-yard box) — only slightly wider than the goal
+        // 5.5m each side of posts, 5.5m deep. Goal is 7.32m so box is 18.32m wide
         g.lineStyle(2, 0xffffff, 0.25);
+        const gaFarW = 120;   // half-width at goal line
+        const gaNearW = 145;  // half-width at near edge (perspective widens)
+        const gaNearY = goalLineY + 65; // 5.5m out from goal line
         g.beginPath();
-        g.moveTo(vpX - 220, GAME_H - 40);
-        g.lineTo(vpX - 130, vpY + 35);
-        g.lineTo(vpX + 130, vpY + 35);
-        g.lineTo(vpX + 220, GAME_H - 40);
+        g.moveTo(vpX - gaNearW, gaNearY);
+        g.lineTo(vpX - gaFarW, goalLineY);
+        g.lineTo(vpX + gaFarW, goalLineY);
+        g.lineTo(vpX + gaNearW, gaNearY);
         g.closePath();
         g.strokePath();
 
-        // six-yard box
+        // penalty area (18-yard box) — much wider, you're standing inside it
+        // 16.5m each side of posts, 16.5m deep. Box is 40.32m wide
+        g.lineStyle(2, 0xffffff, 0.3);
+        const paFarW = 250;   // half-width at goal line
+        const paNearW = 400;  // half-width at near edge (way past screen edges)
+        const paNearY = GAME_H - 20; // near edge of box — just below the player/penalty mark
+        // near edge horizontal line
+        g.beginPath(); g.moveTo(vpX - paNearW, paNearY); g.lineTo(vpX + paNearW, paNearY); g.strokePath();
+        // side lines connecting near edge to goal line
+        g.beginPath(); g.moveTo(vpX - paNearW, paNearY); g.lineTo(vpX - paFarW, goalLineY); g.strokePath();
+        g.beginPath(); g.moveTo(vpX + paNearW, paNearY); g.lineTo(vpX + paFarW, goalLineY); g.strokePath();
+
+        // penalty mark — where the player stands (GAME_H - 60)
+        const penSpotY = GAME_H - 60;
+        g.fillStyle(0xffffff, 0.6);
+        g.fillCircle(vpX, penSpotY, 4);
+
+        // penalty arc (the D) — OUTSIDE the penalty area, curves away from goal
         g.lineStyle(2, 0xffffff, 0.2);
         g.beginPath();
-        g.moveTo(vpX - 100, vpY + 90);
-        g.lineTo(vpX - 80, vpY + 40);
-        g.lineTo(vpX + 80, vpY + 40);
-        g.lineTo(vpX + 100, vpY + 90);
-        g.closePath();
-        g.strokePath();
-
-        // penalty spot
-        g.fillStyle(0xffffff, 0.5);
-        g.fillCircle(vpX, GAME_H - 90, 3);
-
-        // center circle arc (partial, behind player)
-        g.lineStyle(2, 0xffffff, 0.15);
-        g.beginPath();
-        g.arc(vpX, GAME_H + 60, 80, Phaser.Math.DegToRad(200), Phaser.Math.DegToRad(340), false);
+        g.arc(vpX, penSpotY, 55, Phaser.Math.DegToRad(30), Phaser.Math.DegToRad(150), false);
         g.strokePath();
 
         // goal — net background + mesh + thick white posts
@@ -2837,33 +3223,52 @@ class PenaltyScene extends Phaser.Scene {
             }
         }
 
-        // field lines — center line, penalty box outlines (perspective from inside net)
-        const vpX2 = GAME_W / 2, vpY2 = GAME_H * 0.25;
-        g.lineStyle(2, 0xffffff, 0.2);
-        // side touchlines converging
-        g.moveTo(0, GAME_H * 0.2); g.lineTo(vpX2 - 200, GAME_H); g.strokePath();
-        g.moveTo(GAME_W, GAME_H * 0.2); g.lineTo(vpX2 + 200, GAME_H); g.strokePath();
-        // penalty box
-        g.lineStyle(2, 0xffffff, 0.2);
-        g.beginPath();
-        g.moveTo(vpX2 - 180, GAME_H);
-        g.lineTo(vpX2 - 100, GAME_H * 0.4);
-        g.lineTo(vpX2 + 100, GAME_H * 0.4);
-        g.lineTo(vpX2 + 180, GAME_H);
-        g.closePath();
-        g.strokePath();
-        // six-yard box
+        // Field lines — goalkeeper view, looking out from goal toward far end
+        // Same real proportions as shoot phase, reversed perspective
+        const vpX2 = GAME_W / 2;
+        const farY = GAME_H * 0.2; // horizon / vanishing point
+
+        // goal line — we're standing on it, extends wide across bottom
         g.lineStyle(2, 0xffffff, 0.15);
+        g.beginPath(); g.moveTo(0, GAME_H - 10); g.lineTo(GAME_W, GAME_H - 10); g.strokePath();
+
+        // goal area (6-yard box) — closest to us, only slightly wider than goal
+        g.lineStyle(2, 0xffffff, 0.25);
+        const gaNearW2 = 180;   // half-width at goal line (near us)
+        const gaFarW2 = 145;    // half-width at far edge
+        const gaFarY2 = GAME_H * 0.65;  // 5.5m out
         g.beginPath();
-        g.moveTo(vpX2 - 120, GAME_H);
-        g.lineTo(vpX2 - 70, GAME_H * 0.6);
-        g.lineTo(vpX2 + 70, GAME_H * 0.6);
-        g.lineTo(vpX2 + 120, GAME_H);
+        g.moveTo(vpX2 - gaNearW2, GAME_H - 10);
+        g.lineTo(vpX2 - gaFarW2, gaFarY2);
+        g.lineTo(vpX2 + gaFarW2, gaFarY2);
+        g.lineTo(vpX2 + gaNearW2, GAME_H - 10);
         g.closePath();
         g.strokePath();
-        // penalty spot
-        g.fillStyle(0xffffff, 0.4);
-        g.fillCircle(vpX2, GAME_H * 0.75, 3);
+
+        // penalty area (18-yard box) — much wider, extends further out
+        g.lineStyle(2, 0xffffff, 0.25);
+        const paNearW2 = 420;   // half-width at goal line (extends past screen edges)
+        const paFarW2 = 260;    // half-width at far edge
+        const paFarY2 = GAME_H * 0.35;  // 16.5m out from goal line
+        g.beginPath();
+        g.moveTo(vpX2 - paNearW2, GAME_H - 10);
+        g.lineTo(vpX2 - paFarW2, paFarY2);
+        // far edge horizontal line
+        g.lineTo(vpX2 + paFarW2, paFarY2);
+        g.lineTo(vpX2 + paNearW2, GAME_H - 10);
+        g.closePath();
+        g.strokePath();
+
+        // penalty spot — 11m out, about 2/3 from goal line to box edge
+        const penSpotY2 = GAME_H - 10 - (GAME_H - 10 - paFarY2) * 0.67;
+        g.fillStyle(0xffffff, 0.5);
+        g.fillCircle(vpX2, penSpotY2, 4);
+
+        // penalty arc (the D) — OUTSIDE the penalty area, curves away from goal
+        g.lineStyle(2, 0xffffff, 0.18);
+        g.beginPath();
+        g.arc(vpX2, penSpotY2, 50, Phaser.Math.DegToRad(220), Phaser.Math.DegToRad(320), false);
+        g.strokePath();
 
         // goal frame (we're inside it — posts and crossbar only, no mesh)
         const frameG = this.add.graphics().setDepth(15);
@@ -3040,6 +3445,14 @@ class PenaltyScene extends Phaser.Scene {
                 fontSize: '16px', fontFamily: 'Arial', color: '#ffdd44', stroke: '#000000', strokeThickness: 3,
             }).setOrigin(1, 0).setDepth(100);
         }
+
+        // Menu button
+        const menuBtn = this.add.text(10, 6, 'ESC MENU', {
+            fontSize: '12px', fontFamily: 'Arial Black, Arial',
+            color: '#ffffff', stroke: '#000000', strokeThickness: 3,
+            backgroundColor: '#00000066', padding: { x: 6, y: 3 },
+        }).setOrigin(0, 0).setDepth(200).setInteractive({ useHandCursor: true });
+        menuBtn.on('pointerdown', () => this.scene.start('Title'));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -3521,7 +3934,7 @@ const config = {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, ProfileScene, LeaderboardScene, TitleScene, GameScene, DribbleScene, PenaltyScene, GameOverScene],
+    scene: [BootScene, ProfileSelectScene, ProfileScene, LeaderboardScene, TitleScene, GameScene, DribbleScene, PenaltyScene, GameOverScene],
 };
 
 const game = new Phaser.Game(config);
