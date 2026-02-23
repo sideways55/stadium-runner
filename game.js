@@ -1,4 +1,4 @@
-// ── Stadium Runner — Phaser 3 ──────────────────────────────────────
+// ── Nutmeg Arcade — Phaser 3 ───────────────────────────────────────
 
 const GAME_W = 800;
 const GAME_H = 500;
@@ -266,6 +266,92 @@ class SoundFX {
 
 const sfx = new SoundFX();
 
+// ── Profile & Leaderboard ──────────────────────────────────────────
+const COUNTRIES = [
+    'Argentina', 'Australia', 'Belgium', 'Brazil', 'Canada',
+    'Chile', 'Colombia', 'Croatia', 'Denmark', 'Ecuador',
+    'England', 'France', 'Germany', 'Ghana', 'Ireland',
+    'Italy', 'Japan', 'Mexico', 'Morocco', 'Netherlands',
+    'Nigeria', 'Norway', 'Poland', 'Portugal', 'Scotland',
+    'South Korea', 'Spain', 'Sweden', 'USA', 'Uruguay', 'Wales',
+];
+
+const COUNTRY_FLAGS = {
+    'Argentina': '\u{1F1E6}\u{1F1F7}', 'Australia': '\u{1F1E6}\u{1F1FA}',
+    'Belgium': '\u{1F1E7}\u{1F1EA}', 'Brazil': '\u{1F1E7}\u{1F1F7}',
+    'Canada': '\u{1F1E8}\u{1F1E6}', 'Chile': '\u{1F1E8}\u{1F1F1}',
+    'Colombia': '\u{1F1E8}\u{1F1F4}', 'Croatia': '\u{1F1ED}\u{1F1F7}',
+    'Denmark': '\u{1F1E9}\u{1F1F0}', 'Ecuador': '\u{1F1EA}\u{1F1E8}',
+    'England': '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
+    'France': '\u{1F1EB}\u{1F1F7}', 'Germany': '\u{1F1E9}\u{1F1EA}',
+    'Ghana': '\u{1F1EC}\u{1F1ED}', 'Ireland': '\u{1F1EE}\u{1F1EA}',
+    'Italy': '\u{1F1EE}\u{1F1F9}', 'Japan': '\u{1F1EF}\u{1F1F5}',
+    'Mexico': '\u{1F1F2}\u{1F1FD}', 'Morocco': '\u{1F1F2}\u{1F1E6}',
+    'Netherlands': '\u{1F1F3}\u{1F1F1}', 'Nigeria': '\u{1F1F3}\u{1F1EC}',
+    'Norway': '\u{1F1F3}\u{1F1F4}', 'Poland': '\u{1F1F5}\u{1F1F1}',
+    'Portugal': '\u{1F1F5}\u{1F1F9}', 'Scotland': '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}',
+    'South Korea': '\u{1F1F0}\u{1F1F7}', 'Spain': '\u{1F1EA}\u{1F1F8}',
+    'Sweden': '\u{1F1F8}\u{1F1EA}', 'USA': '\u{1F1FA}\u{1F1F8}',
+    'Uruguay': '\u{1F1FA}\u{1F1FE}', 'Wales': '\u{1F3F4}\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}',
+};
+
+function getFlag(country) {
+    return COUNTRY_FLAGS[country] || country;
+}
+
+const CLUBS = [
+    'Ajax', 'Arsenal', 'Atletico Madrid', 'Barcelona', 'Bayern Munich',
+    'Benfica', 'Borussia Dortmund', 'Celtic', 'Chelsea', 'Flamengo',
+    'Inter Milan', 'Juventus', 'Leeds United', 'Liverpool', 'Lyon',
+    'Man City', 'Man United', 'Marseille', 'AC Milan', 'Napoli',
+    'Newcastle', 'PSG', 'Porto', 'Rangers', 'Real Madrid',
+    'River Plate', 'Roma', 'Santos', 'Sao Paulo', 'Spurs',
+    'West Ham', 'Wolves',
+];
+
+const ProfileManager = {
+    PROFILE_KEY: 'stadium_profile',
+    LEADERBOARD_KEY: 'stadium_leaderboard',
+    MAX_ENTRIES: 10,
+
+    getProfile() {
+        const raw = localStorage.getItem(this.PROFILE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    },
+    saveProfile(profile) {
+        localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile));
+    },
+    hasProfile() {
+        return this.getProfile() !== null;
+    },
+    getLeaderboard() {
+        const raw = localStorage.getItem(this.LEADERBOARD_KEY);
+        return raw ? JSON.parse(raw) : { dodgeball: [], dribble: [], penalties: [] };
+    },
+    addEntry(mode, entryData) {
+        const profile = this.getProfile();
+        if (!profile) return;
+        const lb = this.getLeaderboard();
+        const entry = {
+            name: profile.name,
+            country: profile.country,
+            club: profile.club,
+            score: entryData.score || 0,
+            level: entryData.level || null,
+            result: entryData.result || null,
+            date: new Date().toISOString().split('T')[0],
+        };
+        if (!lb[mode]) lb[mode] = [];
+        lb[mode].push(entry);
+        lb[mode].sort((a, b) => b.score - a.score);
+        lb[mode] = lb[mode].slice(0, this.MAX_ENTRIES);
+        localStorage.setItem(this.LEADERBOARD_KEY, JSON.stringify(lb));
+    },
+    getEntries(mode) {
+        return this.getLeaderboard()[mode] || [];
+    },
+};
+
 // ── Boot Scene ─────────────────────────────────────────────────────
 class BootScene extends Phaser.Scene {
     constructor() { super('Boot'); }
@@ -273,7 +359,11 @@ class BootScene extends Phaser.Scene {
     create() {
         sfx.init();
         this.generateTextures();
-        this.scene.start('Title');
+        if (ProfileManager.hasProfile()) {
+            this.scene.start('Title');
+        } else {
+            this.scene.start('Profile');
+        }
     }
 
     generateTextures() {
@@ -443,6 +533,667 @@ class BootScene extends Phaser.Scene {
     }
 }
 
+// ── Profile Scene ──────────────────────────────────────────────────
+class ProfileScene extends Phaser.Scene {
+    constructor() { super('Profile'); }
+
+    init(data) {
+        this.returnTo = data.returnTo || 'Title';
+        this.existingProfile = ProfileManager.getProfile();
+    }
+
+    create() {
+        this.cameras.main.setBackgroundColor('#1a2a4a');
+        this.step = 'name';
+        this.currentName = this.existingProfile ? this.existingProfile.name : '';
+
+        // title
+        this.add.text(GAME_W / 2, 30, 'PLAYER PROFILE', {
+            fontSize: '36px', fontFamily: 'Arial Black, Arial',
+            color: '#ffffff', stroke: '#000000', strokeThickness: 5,
+        }).setOrigin(0.5);
+
+        // step indicator
+        this.stepTexts = [];
+        const steps = ['NAME', 'NATIONALITY', 'CLUB'];
+        const stepY = 70;
+        for (let i = 0; i < 3; i++) {
+            const x = GAME_W / 2 + (i - 1) * 140;
+            this.stepTexts.push(this.add.text(x, stepY, steps[i], {
+                fontSize: '16px', fontFamily: 'Arial Black, Arial', color: '#555555',
+            }).setOrigin(0.5));
+            if (i < 2) {
+                this.add.text(x + 70, stepY, '>', {
+                    fontSize: '16px', fontFamily: 'Arial', color: '#444444',
+                }).setOrigin(0.5);
+            }
+        }
+
+        // container for step content
+        this.stepContainer = this.add.container(0, 0);
+
+        this.updateStepIndicator();
+        this.setupNameInput();
+    }
+
+    updateStepIndicator() {
+        const idx = this.step === 'name' ? 0 : this.step === 'country' ? 1 : 2;
+        this.stepTexts.forEach((t, i) => {
+            if (i < idx) t.setColor('#ffdd44');
+            else if (i === idx) t.setColor('#44ff88');
+            else t.setColor('#555555');
+        });
+    }
+
+    clearStep() {
+        this.stepContainer.removeAll(true);
+        this.input.keyboard.removeAllListeners();
+    }
+
+    // ── NAME INPUT (arcade letter grid) ──
+    setupNameInput() {
+        this.clearStep();
+        this.nameChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ '.split('');
+        this.gridCols = 9;
+        this.gridRows = 3;
+        this.gridX = 0;
+        this.gridY = 0;
+        this.specialRow = false; // when true, cursor is on DEL/OK row
+        this.specialIdx = 0; // 0=DEL, 1=OK
+        this.maxNameLen = 10;
+
+        // name preview
+        this.namePreview = this.add.text(GAME_W / 2, 110, this.getNamePreview(), {
+            fontSize: '30px', fontFamily: 'Arial Black, Arial', color: '#44ff88',
+        }).setOrigin(0.5);
+        this.stepContainer.add(this.namePreview);
+
+        // letter grid
+        const startX = GAME_W / 2 - (this.gridCols - 1) * 24;
+        const startY = 165;
+        const cellW = 48;
+        const cellH = 44;
+        this.letterTexts = [];
+
+        for (let row = 0; row < this.gridRows; row++) {
+            this.letterTexts[row] = [];
+            for (let col = 0; col < this.gridCols; col++) {
+                const idx = row * this.gridCols + col;
+                if (idx < this.nameChars.length) {
+                    const ch = this.nameChars[idx] === ' ' ? '_' : this.nameChars[idx];
+                    const txt = this.add.text(startX + col * cellW, startY + row * cellH, ch, {
+                        fontSize: '24px', fontFamily: 'Arial Black, Arial', color: '#888888',
+                    }).setOrigin(0.5);
+                    this.letterTexts[row][col] = txt;
+                    this.stepContainer.add(txt);
+                }
+            }
+        }
+
+        // DEL and OK buttons
+        const specialY = startY + this.gridRows * cellH + 10;
+        this.delText = this.add.text(GAME_W / 2 - 80, specialY, 'DEL', {
+            fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#888888',
+        }).setOrigin(0.5);
+        this.okText = this.add.text(GAME_W / 2 + 80, specialY, 'OK', {
+            fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#888888',
+        }).setOrigin(0.5);
+        this.stepContainer.add(this.delText);
+        this.stepContainer.add(this.okText);
+
+        // cursor highlight
+        this.cursorGfx = this.add.graphics();
+        this.stepContainer.add(this.cursorGfx);
+
+        // hint
+        const hint = this.add.text(GAME_W / 2, GAME_H - 25, 'Arrow Keys to move, SPACE to select', {
+            fontSize: '14px', fontFamily: 'Arial', color: '#aaaaaa',
+        }).setOrigin(0.5);
+        this.stepContainer.add(hint);
+
+        this.updateNameGrid();
+
+        // input
+        this.input.keyboard.on('keydown-LEFT', () => {
+            if (this.specialRow) { this.specialIdx = Math.max(0, this.specialIdx - 1); }
+            else { this.gridX = Math.max(0, this.gridX - 1); }
+            this.updateNameGrid();
+        });
+        this.input.keyboard.on('keydown-RIGHT', () => {
+            if (this.specialRow) { this.specialIdx = Math.min(1, this.specialIdx + 1); }
+            else { this.gridX = Math.min(this.gridCols - 1, this.gridX); const maxCol = Math.min(this.gridCols - 1, this.nameChars.length - this.gridY * this.gridCols - 1); this.gridX = Math.min(this.gridX + 1, maxCol); }
+            this.updateNameGrid();
+        });
+        this.input.keyboard.on('keydown-UP', () => {
+            if (this.specialRow) { this.specialRow = false; }
+            else if (this.gridY > 0) { this.gridY--; }
+            this.updateNameGrid();
+        });
+        this.input.keyboard.on('keydown-DOWN', () => {
+            if (!this.specialRow && this.gridY < this.gridRows - 1) { this.gridY++; }
+            else if (!this.specialRow) { this.specialRow = true; }
+            this.updateNameGrid();
+        });
+        this.input.keyboard.on('keydown-A', () => { if (!this.specialRow) { this.gridX = Math.max(0, this.gridX - 1); this.updateNameGrid(); } });
+        this.input.keyboard.on('keydown-D', () => { if (!this.specialRow) { const maxCol = Math.min(this.gridCols - 1, this.nameChars.length - this.gridY * this.gridCols - 1); this.gridX = Math.min(this.gridX + 1, maxCol); this.updateNameGrid(); } });
+        this.input.keyboard.on('keydown-W', () => { if (this.specialRow) { this.specialRow = false; } else if (this.gridY > 0) { this.gridY--; } this.updateNameGrid(); });
+        this.input.keyboard.on('keydown-S', () => { if (!this.specialRow && this.gridY < this.gridRows - 1) { this.gridY++; } else if (!this.specialRow) { this.specialRow = true; } this.updateNameGrid(); });
+
+        this.input.keyboard.on('keydown-SPACE', () => this.selectNameChar());
+        this.input.keyboard.on('keydown-ESC', () => {
+            if (this.existingProfile) this.scene.start(this.returnTo);
+        });
+    }
+
+    getNamePreview() {
+        let preview = this.currentName;
+        while (preview.length < this.maxNameLen) preview += '_';
+        return preview.split('').join(' ');
+    }
+
+    selectNameChar() {
+        if (this.specialRow) {
+            if (this.specialIdx === 0) {
+                // DEL
+                if (this.currentName.length > 0) {
+                    this.currentName = this.currentName.slice(0, -1);
+                    sfx.select();
+                }
+            } else {
+                // OK
+                if (this.currentName.trim().length >= 1) {
+                    sfx.levelUp();
+                    this.step = 'country';
+                    this.updateStepIndicator();
+                    this.setupCountrySelect();
+                    return;
+                }
+            }
+        } else {
+            const idx = this.gridY * this.gridCols + this.gridX;
+            if (idx < this.nameChars.length && this.currentName.length < this.maxNameLen) {
+                this.currentName += this.nameChars[idx];
+                sfx.select();
+            }
+        }
+        this.namePreview.setText(this.getNamePreview());
+        this.updateNameGrid();
+    }
+
+    updateNameGrid() {
+        // highlight current cell, dim others
+        for (let row = 0; row < this.gridRows; row++) {
+            for (let col = 0; col < this.gridCols; col++) {
+                const txt = this.letterTexts[row] && this.letterTexts[row][col];
+                if (txt) {
+                    if (!this.specialRow && row === this.gridY && col === this.gridX) {
+                        txt.setColor('#44ff88').setScale(1.3);
+                    } else {
+                        txt.setColor('#888888').setScale(1);
+                    }
+                }
+            }
+        }
+        this.delText.setColor(this.specialRow && this.specialIdx === 0 ? '#ff6644' : '#888888');
+        this.delText.setScale(this.specialRow && this.specialIdx === 0 ? 1.3 : 1);
+        this.okText.setColor(this.specialRow && this.specialIdx === 1 ? '#44ff88' : '#888888');
+        this.okText.setScale(this.specialRow && this.specialIdx === 1 ? 1.3 : 1);
+
+        // cursor box
+        this.cursorGfx.clear();
+        this.cursorGfx.lineStyle(2, 0x44ff88, 0.8);
+        if (this.specialRow) {
+            const target = this.specialIdx === 0 ? this.delText : this.okText;
+            this.cursorGfx.strokeRoundedRect(target.x - 30, target.y - 16, 60, 32, 5);
+        } else {
+            const txt = this.letterTexts[this.gridY] && this.letterTexts[this.gridY][this.gridX];
+            if (txt) this.cursorGfx.strokeRoundedRect(txt.x - 18, txt.y - 18, 36, 36, 5);
+        }
+    }
+
+    // ── COUNTRY SELECT ──
+    setupCountrySelect() {
+        this.clearStep();
+        this.listItems = COUNTRIES;
+        this.listIdx = 0;
+        if (this.existingProfile) {
+            const idx = COUNTRIES.indexOf(this.existingProfile.country);
+            if (idx >= 0) this.listIdx = idx;
+        }
+        this.setupScrollableList('Select Your Nationality', () => {
+            this.selectedCountry = this.listItems[this.listIdx];
+            this.step = 'club';
+            this.updateStepIndicator();
+            this.setupClubSelect();
+        }, () => {
+            this.step = 'name';
+            this.updateStepIndicator();
+            this.setupNameInput();
+        });
+    }
+
+    // ── CLUB TYPE CHOICE ──
+    setupClubSelect() {
+        this.clearStep();
+
+        const title = this.add.text(GAME_W / 2, 110, 'Choose Club Type', {
+            fontSize: '24px', fontFamily: 'Arial Black, Arial', color: '#ffffff',
+        }).setOrigin(0.5);
+        this.stepContainer.add(title);
+
+        this.clubTypeIdx = 0;
+        const btnStyle = { fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#888888', stroke: '#000000', strokeThickness: 3 };
+        const descStyle = { fontSize: '13px', fontFamily: 'Arial', color: '#aaaaaa', align: 'center' };
+
+        this.clubTypeBtns = [
+            this.add.text(GAME_W / 2 - 150, 210, 'Pro Club', btnStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 + 150, 210, 'Local Club', btnStyle).setOrigin(0.5),
+        ];
+        this.clubTypeDescs = [
+            this.add.text(GAME_W / 2 - 150, 245, 'Pick from a list of\nprofessional clubs', descStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 + 150, 245, 'Type in the name of\nyour local club', descStyle).setOrigin(0.5),
+        ];
+        this.clubTypeBtns.forEach(b => this.stepContainer.add(b));
+        this.clubTypeDescs.forEach(d => this.stepContainer.add(d));
+
+        const hint = this.add.text(GAME_W / 2, GAME_H - 25, 'LEFT/RIGHT to choose, SPACE to confirm, ESC to go back', {
+            fontSize: '14px', fontFamily: 'Arial', color: '#aaaaaa',
+        }).setOrigin(0.5);
+        this.stepContainer.add(hint);
+
+        this.updateClubTypeSelection();
+
+        this.input.keyboard.on('keydown-LEFT', () => { this.clubTypeIdx = 0; this.updateClubTypeSelection(); });
+        this.input.keyboard.on('keydown-RIGHT', () => { this.clubTypeIdx = 1; this.updateClubTypeSelection(); });
+        this.input.keyboard.on('keydown-A', () => { this.clubTypeIdx = 0; this.updateClubTypeSelection(); });
+        this.input.keyboard.on('keydown-D', () => { this.clubTypeIdx = 1; this.updateClubTypeSelection(); });
+        this.input.keyboard.on('keydown-SPACE', () => {
+            sfx.select();
+            if (this.clubTypeIdx === 0) this.setupProClubSelect();
+            else this.setupLocalClubInput();
+        });
+        this.input.keyboard.on('keydown-ESC', () => {
+            this.step = 'country';
+            this.updateStepIndicator();
+            this.setupCountrySelect();
+        });
+    }
+
+    updateClubTypeSelection() {
+        this.clubTypeBtns.forEach((btn, i) => {
+            btn.setColor(i === this.clubTypeIdx ? '#44ff88' : '#888888');
+            btn.setScale(i === this.clubTypeIdx ? 1.15 : 1);
+        });
+    }
+
+    // ── PRO CLUB (scrollable list) ──
+    setupProClubSelect() {
+        this.clearStep();
+        this.listItems = CLUBS;
+        this.listIdx = 0;
+        if (this.existingProfile) {
+            const idx = CLUBS.indexOf(this.existingProfile.club);
+            if (idx >= 0) this.listIdx = idx;
+        }
+        this.setupScrollableList('Select Pro Club', () => {
+            this.finishProfile(this.listItems[this.listIdx]);
+        }, () => {
+            this.setupClubSelect();
+        });
+    }
+
+    // ── LOCAL CLUB (type name) ──
+    setupLocalClubInput() {
+        this.clearStep();
+        this.clubName = '';
+        this.maxClubLen = 16;
+        this.nameChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ '.split('');
+        this.gridCols = 9;
+        this.gridRows = 3;
+        this.gridX = 0;
+        this.gridY = 0;
+        this.specialRow = false;
+        this.specialIdx = 0;
+
+        const titleTxt = this.add.text(GAME_W / 2, 100, 'Type Your Club Name', {
+            fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#ffffff',
+        }).setOrigin(0.5);
+        this.stepContainer.add(titleTxt);
+
+        // club name preview
+        this.clubPreview = this.add.text(GAME_W / 2, 135, this.getClubPreview(), {
+            fontSize: '26px', fontFamily: 'Arial Black, Arial', color: '#44ff88',
+        }).setOrigin(0.5);
+        this.stepContainer.add(this.clubPreview);
+
+        // letter grid
+        const startX = GAME_W / 2 - (this.gridCols - 1) * 24;
+        const startY = 175;
+        const cellW = 48;
+        const cellH = 40;
+        this.letterTexts = [];
+
+        for (let row = 0; row < this.gridRows; row++) {
+            this.letterTexts[row] = [];
+            for (let col = 0; col < this.gridCols; col++) {
+                const idx = row * this.gridCols + col;
+                if (idx < this.nameChars.length) {
+                    const ch = this.nameChars[idx] === ' ' ? '_' : this.nameChars[idx];
+                    const txt = this.add.text(startX + col * cellW, startY + row * cellH, ch, {
+                        fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#888888',
+                    }).setOrigin(0.5);
+                    this.letterTexts[row][col] = txt;
+                    this.stepContainer.add(txt);
+                }
+            }
+        }
+
+        // DEL and OK
+        const specialY = startY + this.gridRows * cellH + 8;
+        this.delText = this.add.text(GAME_W / 2 - 80, specialY, 'DEL', {
+            fontSize: '20px', fontFamily: 'Arial Black, Arial', color: '#888888',
+        }).setOrigin(0.5);
+        this.okText = this.add.text(GAME_W / 2 + 80, specialY, 'OK', {
+            fontSize: '20px', fontFamily: 'Arial Black, Arial', color: '#888888',
+        }).setOrigin(0.5);
+        this.stepContainer.add(this.delText);
+        this.stepContainer.add(this.okText);
+
+        this.cursorGfx = this.add.graphics();
+        this.stepContainer.add(this.cursorGfx);
+
+        const hint = this.add.text(GAME_W / 2, GAME_H - 25, 'Arrow Keys to move, SPACE to select, ESC to go back', {
+            fontSize: '14px', fontFamily: 'Arial', color: '#aaaaaa',
+        }).setOrigin(0.5);
+        this.stepContainer.add(hint);
+
+        this.updateClubGrid();
+
+        // input
+        this.input.keyboard.on('keydown-LEFT', () => {
+            if (this.specialRow) this.specialIdx = Math.max(0, this.specialIdx - 1);
+            else this.gridX = Math.max(0, this.gridX - 1);
+            this.updateClubGrid();
+        });
+        this.input.keyboard.on('keydown-RIGHT', () => {
+            if (this.specialRow) this.specialIdx = Math.min(1, this.specialIdx + 1);
+            else { const maxCol = Math.min(this.gridCols - 1, this.nameChars.length - this.gridY * this.gridCols - 1); this.gridX = Math.min(this.gridX + 1, maxCol); }
+            this.updateClubGrid();
+        });
+        this.input.keyboard.on('keydown-UP', () => {
+            if (this.specialRow) this.specialRow = false;
+            else if (this.gridY > 0) this.gridY--;
+            this.updateClubGrid();
+        });
+        this.input.keyboard.on('keydown-DOWN', () => {
+            if (!this.specialRow && this.gridY < this.gridRows - 1) this.gridY++;
+            else if (!this.specialRow) this.specialRow = true;
+            this.updateClubGrid();
+        });
+        this.input.keyboard.on('keydown-A', () => { if (!this.specialRow) { this.gridX = Math.max(0, this.gridX - 1); this.updateClubGrid(); } });
+        this.input.keyboard.on('keydown-D', () => { if (!this.specialRow) { const maxCol = Math.min(this.gridCols - 1, this.nameChars.length - this.gridY * this.gridCols - 1); this.gridX = Math.min(this.gridX + 1, maxCol); this.updateClubGrid(); } });
+        this.input.keyboard.on('keydown-W', () => { if (this.specialRow) this.specialRow = false; else if (this.gridY > 0) this.gridY--; this.updateClubGrid(); });
+        this.input.keyboard.on('keydown-S', () => { if (!this.specialRow && this.gridY < this.gridRows - 1) this.gridY++; else if (!this.specialRow) this.specialRow = true; this.updateClubGrid(); });
+        this.input.keyboard.on('keydown-SPACE', () => this.selectClubChar());
+        this.input.keyboard.on('keydown-ESC', () => this.setupClubSelect());
+    }
+
+    getClubPreview() {
+        let preview = this.clubName;
+        while (preview.length < this.maxClubLen) preview += '_';
+        return preview.split('').join(' ');
+    }
+
+    selectClubChar() {
+        if (this.specialRow) {
+            if (this.specialIdx === 0) {
+                if (this.clubName.length > 0) { this.clubName = this.clubName.slice(0, -1); sfx.select(); }
+            } else {
+                if (this.clubName.trim().length >= 1) {
+                    this.finishProfile(this.clubName.trim());
+                    return;
+                }
+            }
+        } else {
+            const idx = this.gridY * this.gridCols + this.gridX;
+            if (idx < this.nameChars.length && this.clubName.length < this.maxClubLen) {
+                this.clubName += this.nameChars[idx];
+                sfx.select();
+            }
+        }
+        this.clubPreview.setText(this.getClubPreview());
+        this.updateClubGrid();
+    }
+
+    updateClubGrid() {
+        for (let row = 0; row < this.gridRows; row++) {
+            for (let col = 0; col < this.gridCols; col++) {
+                const txt = this.letterTexts[row] && this.letterTexts[row][col];
+                if (txt) {
+                    if (!this.specialRow && row === this.gridY && col === this.gridX) {
+                        txt.setColor('#44ff88').setScale(1.3);
+                    } else {
+                        txt.setColor('#888888').setScale(1);
+                    }
+                }
+            }
+        }
+        this.delText.setColor(this.specialRow && this.specialIdx === 0 ? '#ff6644' : '#888888');
+        this.delText.setScale(this.specialRow && this.specialIdx === 0 ? 1.3 : 1);
+        this.okText.setColor(this.specialRow && this.specialIdx === 1 ? '#44ff88' : '#888888');
+        this.okText.setScale(this.specialRow && this.specialIdx === 1 ? 1.3 : 1);
+
+        this.cursorGfx.clear();
+        this.cursorGfx.lineStyle(2, 0x44ff88, 0.8);
+        if (this.specialRow) {
+            const target = this.specialIdx === 0 ? this.delText : this.okText;
+            this.cursorGfx.strokeRoundedRect(target.x - 30, target.y - 16, 60, 32, 5);
+        } else {
+            const txt = this.letterTexts[this.gridY] && this.letterTexts[this.gridY][this.gridX];
+            if (txt) this.cursorGfx.strokeRoundedRect(txt.x - 18, txt.y - 16, 36, 32, 5);
+        }
+    }
+
+    finishProfile(clubName) {
+        ProfileManager.saveProfile({
+            name: this.currentName.trim(),
+            country: this.selectedCountry,
+            club: clubName,
+        });
+        sfx.levelUp();
+        this.scene.start(this.returnTo);
+    }
+
+    // ── SHARED SCROLLABLE LIST ──
+    setupScrollableList(title, onConfirm, onBack) {
+        const titleTxt = this.add.text(GAME_W / 2, 105, title, {
+            fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#ffffff',
+        }).setOrigin(0.5);
+        this.stepContainer.add(titleTxt);
+
+        const visibleCount = 7;
+        const centerY = 270;
+        const spacing = 38;
+        this.listTexts = [];
+
+        for (let i = 0; i < visibleCount; i++) {
+            const y = centerY + (i - 3) * spacing;
+            const txt = this.add.text(GAME_W / 2, y, '', {
+                fontSize: '22px', fontFamily: 'Arial', color: '#888888',
+            }).setOrigin(0.5);
+            this.listTexts.push(txt);
+            this.stepContainer.add(txt);
+        }
+
+        // arrows hint
+        const upArrow = this.add.text(GAME_W / 2, centerY - 3.5 * spacing - 5, '^ ^ ^', {
+            fontSize: '16px', fontFamily: 'Arial', color: '#555555',
+        }).setOrigin(0.5);
+        const downArrow = this.add.text(GAME_W / 2, centerY + 3.5 * spacing + 5, 'v v v', {
+            fontSize: '16px', fontFamily: 'Arial', color: '#555555',
+        }).setOrigin(0.5);
+        this.stepContainer.add(upArrow);
+        this.stepContainer.add(downArrow);
+
+        const hint = this.add.text(GAME_W / 2, GAME_H - 25, 'UP/DOWN to scroll, SPACE to confirm, ESC to go back', {
+            fontSize: '14px', fontFamily: 'Arial', color: '#aaaaaa',
+        }).setOrigin(0.5);
+        this.stepContainer.add(hint);
+
+        this.updateScrollableList();
+
+        this.input.keyboard.on('keydown-UP', () => { this.listIdx = Math.max(0, this.listIdx - 1); sfx.select(); this.updateScrollableList(); });
+        this.input.keyboard.on('keydown-DOWN', () => { this.listIdx = Math.min(this.listItems.length - 1, this.listIdx + 1); sfx.select(); this.updateScrollableList(); });
+        this.input.keyboard.on('keydown-W', () => { this.listIdx = Math.max(0, this.listIdx - 1); sfx.select(); this.updateScrollableList(); });
+        this.input.keyboard.on('keydown-S', () => { this.listIdx = Math.min(this.listItems.length - 1, this.listIdx + 1); sfx.select(); this.updateScrollableList(); });
+        this.input.keyboard.on('keydown-SPACE', () => onConfirm());
+        this.input.keyboard.on('keydown-ESC', () => onBack());
+    }
+
+    updateScrollableList() {
+        const mid = 3;
+        const isCountryList = this.listItems === COUNTRIES;
+        for (let i = 0; i < this.listTexts.length; i++) {
+            const dataIdx = this.listIdx + (i - mid);
+            if (dataIdx >= 0 && dataIdx < this.listItems.length) {
+                const item = this.listItems[dataIdx];
+                const label = isCountryList ? `${getFlag(item)}  ${item}` : item;
+                this.listTexts[i].setText(label).setVisible(true);
+                const dist = Math.abs(i - mid);
+                if (dist === 0) {
+                    this.listTexts[i].setColor('#44ff88').setScale(1.2).setAlpha(1);
+                } else {
+                    this.listTexts[i].setColor('#aaaaaa').setScale(1).setAlpha(1 - dist * 0.2);
+                }
+            } else {
+                this.listTexts[i].setVisible(false);
+            }
+        }
+    }
+}
+
+// ── Leaderboard Scene ──────────────────────────────────────────────
+class LeaderboardScene extends Phaser.Scene {
+    constructor() { super('Leaderboard'); }
+
+    init(data) {
+        this.returnTo = data.returnTo || 'Title';
+        this.returnData = data.returnData || {};
+    }
+
+    create() {
+        this.cameras.main.setBackgroundColor('#1a1a2e');
+
+        this.add.text(GAME_W / 2, 30, 'LEADERBOARD', {
+            fontSize: '34px', fontFamily: 'Arial Black, Arial',
+            color: '#ffdd44', stroke: '#000000', strokeThickness: 5,
+        }).setOrigin(0.5);
+
+        // mode tabs
+        this.modes = ['dodgeball', 'dribble', 'penalties'];
+        this.modeLabels = ['DODGEBALL', 'DRIBBLE', 'PENALTIES'];
+        this.selectedMode = 0;
+        this.tabTexts = [];
+
+        for (let i = 0; i < 3; i++) {
+            const x = GAME_W / 2 + (i - 1) * 180;
+            const txt = this.add.text(x, 70, this.modeLabels[i], {
+                fontSize: '16px', fontFamily: 'Arial Black, Arial', color: '#888888',
+            }).setOrigin(0.5);
+            this.tabTexts.push(txt);
+        }
+
+        // column headers
+        const headerY = 105;
+        const hStyle = { fontSize: '12px', fontFamily: 'Arial Black, Arial', color: '#ffdd44' };
+        this.add.text(50, headerY, '#', hStyle).setOrigin(0.5);
+        this.add.text(160, headerY, 'NAME', hStyle).setOrigin(0.5);
+        this.add.text(300, headerY, 'NAT.', hStyle).setOrigin(0.5);
+        this.add.text(440, headerY, 'CLUB', hStyle).setOrigin(0.5);
+        this.add.text(590, headerY, 'SCORE', hStyle).setOrigin(0.5);
+        this.add.text(710, headerY, 'DATE', hStyle).setOrigin(0.5);
+
+        // separator line
+        const lineGfx = this.add.graphics();
+        lineGfx.lineStyle(1, 0xffdd44, 0.3);
+        lineGfx.moveTo(20, headerY + 12);
+        lineGfx.lineTo(GAME_W - 20, headerY + 12);
+        lineGfx.strokePath();
+
+        this.entryTexts = [];
+        this.updateTabs();
+        this.displayEntries();
+
+        // hint
+        this.add.text(GAME_W / 2, GAME_H - 20, 'LEFT/RIGHT: switch mode  |  SPACE: back', {
+            fontSize: '13px', fontFamily: 'Arial', color: '#777777',
+        }).setOrigin(0.5);
+
+        // input (delayed to prevent accidental press)
+        this.time.delayedCall(300, () => {
+            this.input.keyboard.on('keydown-LEFT', () => { this.selectedMode = Math.max(0, this.selectedMode - 1); sfx.select(); this.updateTabs(); this.displayEntries(); });
+            this.input.keyboard.on('keydown-RIGHT', () => { this.selectedMode = Math.min(2, this.selectedMode + 1); sfx.select(); this.updateTabs(); this.displayEntries(); });
+            this.input.keyboard.on('keydown-A', () => { this.selectedMode = Math.max(0, this.selectedMode - 1); sfx.select(); this.updateTabs(); this.displayEntries(); });
+            this.input.keyboard.on('keydown-D', () => { this.selectedMode = Math.min(2, this.selectedMode + 1); sfx.select(); this.updateTabs(); this.displayEntries(); });
+            this.input.keyboard.on('keydown-SPACE', () => this.scene.start(this.returnTo, this.returnData));
+            this.input.keyboard.on('keydown-ESC', () => this.scene.start(this.returnTo, this.returnData));
+        });
+    }
+
+    updateTabs() {
+        this.tabTexts.forEach((t, i) => {
+            if (i === this.selectedMode) {
+                t.setColor('#44ff88').setScale(1.15);
+            } else {
+                t.setColor('#888888').setScale(1);
+            }
+        });
+    }
+
+    displayEntries() {
+        this.entryTexts.forEach(t => t.destroy());
+        this.entryTexts = [];
+
+        const mode = this.modes[this.selectedMode];
+        const entries = ProfileManager.getEntries(mode);
+        const startY = 130;
+        const rowH = 29;
+        const profile = ProfileManager.getProfile();
+
+        if (entries.length === 0) {
+            const empty = this.add.text(GAME_W / 2, 260, 'No entries yet!\nPlay a game to appear here.', {
+                fontSize: '20px', fontFamily: 'Arial', color: '#555555', align: 'center',
+            }).setOrigin(0.5);
+            this.entryTexts.push(empty);
+            return;
+        }
+
+        entries.forEach((entry, i) => {
+            const y = startY + i * rowH;
+            const rankColors = ['#ffd700', '#c0c0c0', '#cd7f32'];
+            const rankColor = i < 3 ? rankColors[i] : '#888888';
+            const isMe = profile && entry.name === profile.name;
+            const textColor = isMe ? '#ccffcc' : '#cccccc';
+            const style = { fontSize: '13px', fontFamily: 'Arial', color: textColor };
+
+            this.entryTexts.push(
+                this.add.text(50, y, `${i + 1}`, { ...style, fontSize: '14px', fontFamily: 'Arial Black, Arial', color: rankColor }).setOrigin(0.5),
+                this.add.text(160, y, entry.name, style).setOrigin(0.5),
+                this.add.text(300, y, getFlag(entry.country), { ...style, fontSize: '18px' }).setOrigin(0.5),
+                this.add.text(440, y, entry.club, style).setOrigin(0.5),
+                this.add.text(590, y, this.formatScore(mode, entry), style).setOrigin(0.5),
+                this.add.text(710, y, entry.date || '', { ...style, fontSize: '11px', color: '#777777' }).setOrigin(0.5),
+            );
+        });
+    }
+
+    formatScore(mode, entry) {
+        if (mode === 'dribble') return `${entry.score} (Lv${entry.level || '?'})`;
+        if (mode === 'penalties') return `${entry.score}${entry.result ? ' ' + entry.result : ''}`;
+        return `${entry.score}`;
+    }
+}
+
 // ── Title Scene (Mode Select) ─────────────────────────────────────
 class TitleScene extends Phaser.Scene {
     constructor() { super('Title'); }
@@ -452,9 +1203,13 @@ class TitleScene extends Phaser.Scene {
         this.drawMiniStadium();
 
         // Title
-        this.add.text(GAME_W / 2, 70, 'STADIUM RUNNER', {
+        this.add.text(GAME_W / 2, 60, 'NUTMEG ARCADE', {
             fontSize: '52px', fontFamily: 'Arial Black, Arial',
             color: '#ffffff', stroke: '#000000', strokeThickness: 6,
+        }).setOrigin(0.5);
+
+        this.add.text(GAME_W / 2, 100, '\u00A9 bzy studios', {
+            fontSize: '13px', fontFamily: 'Arial', color: '#88aa88',
         }).setOrigin(0.5);
 
         this.add.text(GAME_W / 2, 130, 'Choose a Game Mode', {
@@ -488,36 +1243,95 @@ class TitleScene extends Phaser.Scene {
             this.add.text(modeX[i], 290, hiLabels[i], { fontSize: '13px', fontFamily: 'Arial', color: '#ffdd44' }).setOrigin(0.5);
         }
 
+        // player profile display
+        const profile = ProfileManager.getProfile();
+        if (profile) {
+            this.add.text(GAME_W - 15, 15, profile.name, {
+                fontSize: '16px', fontFamily: 'Arial Black, Arial',
+                color: '#ffdd44', stroke: '#000000', strokeThickness: 3,
+            }).setOrigin(1, 0);
+            this.add.text(GAME_W - 15, 35, `${profile.club} | ${getFlag(profile.country)}`, {
+                fontSize: '11px', fontFamily: 'Arial', color: '#aaaaaa',
+            }).setOrigin(1, 0);
+        }
+
+        // utility buttons row
+        this.navRow = 0; // 0 = modes, 1 = utility
+        this.utilSelected = 0;
+        const utilStyle = { fontSize: '18px', fontFamily: 'Arial Black, Arial', color: '#888888', stroke: '#000000', strokeThickness: 3 };
+        this.utilBtns = [
+            this.add.text(GAME_W / 2 - 130, 340, 'Leaderboard', utilStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 + 130, 340, 'Edit Profile', utilStyle).setOrigin(0.5),
+        ];
+
         // Controls hint
-        this.add.text(GAME_W / 2, 400, 'Arrow Keys / WASD to move  |  Touch & drag on mobile', {
+        this.add.text(GAME_W / 2, 400, 'Arrow Keys / WASD to navigate  |  Touch & drag on mobile', {
             fontSize: '14px', fontFamily: 'Arial', color: '#88aa88',
         }).setOrigin(0.5);
 
         // Blink prompt
-        const prompt = this.add.text(GAME_W / 2, 440, 'Left / Right to choose, SPACE to start', {
+        const prompt = this.add.text(GAME_W / 2, 440, 'SPACE to select', {
             fontSize: '18px', fontFamily: 'Arial', color: '#ffffff',
         }).setOrigin(0.5);
         this.tweens.add({ targets: prompt, alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
 
-        this.updateModeSelection();
+        this.updateAllSelections();
 
         // Input
-        this.input.keyboard.on('keydown-LEFT', () => { this.selected = Math.max(0, this.selected - 1); this.updateModeSelection(); });
-        this.input.keyboard.on('keydown-RIGHT', () => { this.selected = Math.min(2, this.selected + 1); this.updateModeSelection(); });
-        this.input.keyboard.on('keydown-A', () => { this.selected = Math.max(0, this.selected - 1); this.updateModeSelection(); });
-        this.input.keyboard.on('keydown-D', () => { this.selected = Math.min(2, this.selected + 1); this.updateModeSelection(); });
-        this.input.keyboard.on('keydown-SPACE', () => this.startGame());
+        this.input.keyboard.on('keydown-LEFT', () => {
+            if (this.navRow === 0) this.selected = Math.max(0, this.selected - 1);
+            else this.utilSelected = Math.max(0, this.utilSelected - 1);
+            this.updateAllSelections();
+        });
+        this.input.keyboard.on('keydown-RIGHT', () => {
+            if (this.navRow === 0) this.selected = Math.min(2, this.selected + 1);
+            else this.utilSelected = Math.min(1, this.utilSelected + 1);
+            this.updateAllSelections();
+        });
+        this.input.keyboard.on('keydown-A', () => {
+            if (this.navRow === 0) this.selected = Math.max(0, this.selected - 1);
+            else this.utilSelected = Math.max(0, this.utilSelected - 1);
+            this.updateAllSelections();
+        });
+        this.input.keyboard.on('keydown-D', () => {
+            if (this.navRow === 0) this.selected = Math.min(2, this.selected + 1);
+            else this.utilSelected = Math.min(1, this.utilSelected + 1);
+            this.updateAllSelections();
+        });
+        this.input.keyboard.on('keydown-UP', () => { if (this.navRow === 1) { this.navRow = 0; this.updateAllSelections(); } });
+        this.input.keyboard.on('keydown-DOWN', () => { if (this.navRow === 0) { this.navRow = 1; this.updateAllSelections(); } });
+        this.input.keyboard.on('keydown-W', () => { if (this.navRow === 1) { this.navRow = 0; this.updateAllSelections(); } });
+        this.input.keyboard.on('keydown-S', () => { if (this.navRow === 0) { this.navRow = 1; this.updateAllSelections(); } });
+        this.input.keyboard.on('keydown-SPACE', () => {
+            if (this.navRow === 0) this.startGame();
+            else this.startUtil();
+        });
 
         this.modeBtns.forEach((btn, i) => {
             btn.setInteractive({ useHandCursor: true });
-            btn.on('pointerdown', () => { this.selected = i; this.startGame(); });
+            btn.on('pointerdown', () => { this.navRow = 0; this.selected = i; this.startGame(); });
+        });
+        this.utilBtns.forEach((btn, i) => {
+            btn.setInteractive({ useHandCursor: true });
+            btn.on('pointerdown', () => { this.navRow = 1; this.utilSelected = i; this.startUtil(); });
         });
     }
 
-    updateModeSelection() {
+    updateAllSelections() {
+        const modeActive = this.navRow === 0;
         this.modeBtns.forEach((btn, i) => {
-            btn.setColor(i === this.selected ? '#44ff88' : '#888888');
-            btn.setScale(i === this.selected ? 1.15 : 1);
+            if (modeActive && i === this.selected) {
+                btn.setColor('#44ff88').setScale(1.15);
+            } else {
+                btn.setColor('#888888').setScale(1);
+            }
+        });
+        this.utilBtns.forEach((btn, i) => {
+            if (!modeActive && i === this.utilSelected) {
+                btn.setColor('#44ff88').setScale(1.1);
+            } else {
+                btn.setColor('#888888').setScale(1);
+            }
         });
     }
 
@@ -542,6 +1356,15 @@ class TitleScene extends Phaser.Scene {
             this.scene.start('Dribble', { level: 1 });
         } else {
             this.scene.start('Penalty', { round: 1, playerGoals: 0, cpuGoals: 0, score: 0 });
+        }
+    }
+
+    startUtil() {
+        sfx.select();
+        if (this.utilSelected === 0) {
+            this.scene.start('Leaderboard');
+        } else {
+            this.scene.start('Profile', { returnTo: 'Title' });
         }
     }
 }
@@ -2488,6 +3311,8 @@ class PenaltyScene extends Phaser.Scene {
             if (this.score > prevHi) localStorage.setItem('penalty_hiScore', this.score.toString());
 
             const won = this.playerGoals > this.cpuGoals;
+            const result = `${won ? 'W' : 'L'} ${this.playerGoals}-${this.cpuGoals}`;
+            ProfileManager.addEntry('penalties', { score: this.score, result: result });
             this.clearScene();
             this.cameras.main.setBackgroundColor(won ? '#1a331a' : '#331a1a');
 
@@ -2523,17 +3348,18 @@ class PenaltyScene extends Phaser.Scene {
                 sfx.hit();
             }
 
-            const btnStyle = { fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4 };
+            const btnStyle = { fontSize: '18px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4 };
             this.selected = 0;
             this.endBtns = [
-                this.add.text(GAME_W / 2 - 120, 340, 'Play Again', btnStyle).setOrigin(0.5),
-                this.add.text(GAME_W / 2 + 120, 340, 'Menu', btnStyle).setOrigin(0.5),
+                this.add.text(GAME_W / 2 - 200, 340, 'Play Again', btnStyle).setOrigin(0.5),
+                this.add.text(GAME_W / 2, 340, 'Leaderboard', btnStyle).setOrigin(0.5),
+                this.add.text(GAME_W / 2 + 200, 340, 'Menu', btnStyle).setOrigin(0.5),
             ];
             this.updateEndSelection();
 
             this.time.delayedCall(500, () => {
-                this.input.keyboard.on('keydown-LEFT', () => { this.selected = 0; this.updateEndSelection(); });
-                this.input.keyboard.on('keydown-RIGHT', () => { this.selected = 1; this.updateEndSelection(); });
+                this.input.keyboard.on('keydown-LEFT', () => { this.selected = Math.max(0, this.selected - 1); this.updateEndSelection(); });
+                this.input.keyboard.on('keydown-RIGHT', () => { this.selected = Math.min(2, this.selected + 1); this.updateEndSelection(); });
                 this.input.keyboard.on('keydown-SPACE', () => this.endConfirm());
                 this.endBtns.forEach((btn, i) => {
                     btn.setInteractive({ useHandCursor: true });
@@ -2558,6 +3384,8 @@ class PenaltyScene extends Phaser.Scene {
         sfx.select();
         if (this.selected === 0) {
             this.scene.start('Penalty', { round: 1, playerGoals: 0, cpuGoals: 0, score: 0 });
+        } else if (this.selected === 1) {
+            this.scene.start('Leaderboard', { returnTo: 'Title' });
         } else {
             this.scene.start('Title');
         }
@@ -2582,9 +3410,11 @@ class GameOverScene extends Phaser.Scene {
         if (this.mode === 'Game') {
             const prevHi = parseInt(localStorage.getItem('stadiumRunner_hiScore') || '0');
             if (this.finalScore > prevHi) localStorage.setItem('stadiumRunner_hiScore', this.finalScore.toString());
+            ProfileManager.addEntry('dodgeball', { score: this.finalScore, level: this.level });
         } else {
             const prevHi = parseInt(localStorage.getItem('dribble_hiLevel') || '0');
             if (this.level > prevHi) localStorage.setItem('dribble_hiLevel', this.level.toString());
+            ProfileManager.addEntry('dribble', { score: this.finalScore, level: this.level });
         }
 
         // dark overlay
@@ -2623,15 +3453,16 @@ class GameOverScene extends Phaser.Scene {
             fontSize: '18px', fontFamily: 'Arial', color: '#ffaa22',
         }).setOrigin(0.5);
 
-        // ── Continue / Reset / Menu buttons ──
+        // ── Continue / Reset / Leaderboard / Menu buttons ──
         this.selected = 0;
         const btnY = 365;
-        const btnStyle = { fontSize: '20px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4 };
+        const btnStyle = { fontSize: '18px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4 };
 
         this.btns = [
-            this.add.text(GAME_W / 2 - 200, btnY, `Continue`, btnStyle).setOrigin(0.5),
-            this.add.text(GAME_W / 2, btnY, 'Reset', btnStyle).setOrigin(0.5),
-            this.add.text(GAME_W / 2 + 200, btnY, 'Menu', btnStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 - 270, btnY, 'Continue', btnStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 - 90, btnY, 'Reset', btnStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 + 100, btnY, 'Leaderboard', btnStyle).setOrigin(0.5),
+            this.add.text(GAME_W / 2 + 280, btnY, 'Menu', btnStyle).setOrigin(0.5),
         ];
 
         this.add.text(GAME_W / 2, btnY + 35, 'Arrow Keys to choose, SPACE to select', {
@@ -2642,9 +3473,9 @@ class GameOverScene extends Phaser.Scene {
 
         this.time.delayedCall(500, () => {
             this.input.keyboard.on('keydown-LEFT', () => { this.selected = Math.max(0, this.selected - 1); this.updateSelection(); });
-            this.input.keyboard.on('keydown-RIGHT', () => { this.selected = Math.min(2, this.selected + 1); this.updateSelection(); });
+            this.input.keyboard.on('keydown-RIGHT', () => { this.selected = Math.min(3, this.selected + 1); this.updateSelection(); });
             this.input.keyboard.on('keydown-A', () => { this.selected = Math.max(0, this.selected - 1); this.updateSelection(); });
-            this.input.keyboard.on('keydown-D', () => { this.selected = Math.min(2, this.selected + 1); this.updateSelection(); });
+            this.input.keyboard.on('keydown-D', () => { this.selected = Math.min(3, this.selected + 1); this.updateSelection(); });
             this.input.keyboard.on('keydown-SPACE', () => this.confirmSelection());
 
             this.btns.forEach((btn, i) => {
@@ -2667,6 +3498,8 @@ class GameOverScene extends Phaser.Scene {
             this.scene.start(this.mode, { level: this.level, score: this.finalScore });
         } else if (this.selected === 1) {
             this.scene.start(this.mode, { level: 1, score: 0 });
+        } else if (this.selected === 2) {
+            this.scene.start('Leaderboard', { returnTo: 'Title' });
         } else {
             this.scene.start('Title');
         }
@@ -2688,7 +3521,7 @@ const config = {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, TitleScene, GameScene, DribbleScene, PenaltyScene, GameOverScene],
+    scene: [BootScene, ProfileScene, LeaderboardScene, TitleScene, GameScene, DribbleScene, PenaltyScene, GameOverScene],
 };
 
 const game = new Phaser.Game(config);
