@@ -319,16 +319,21 @@ const ProfileManager = {
     migrateIfNeeded() {
         const legacy = localStorage.getItem(this.PROFILE_KEY);
         if (legacy && !localStorage.getItem(this.PROFILES_KEY)) {
-            const old = JSON.parse(legacy);
-            old.id = Date.now();
-            localStorage.setItem(this.PROFILES_KEY, JSON.stringify([old]));
-            localStorage.setItem(this.ACTIVE_KEY, String(old.id));
+            try {
+                const old = JSON.parse(legacy);
+                old.id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+                localStorage.setItem(this.PROFILES_KEY, JSON.stringify([old]));
+                localStorage.setItem(this.ACTIVE_KEY, String(old.id));
+            } catch (e) {
+                // corrupted legacy data — discard it
+            }
             localStorage.removeItem(this.PROFILE_KEY);
         }
         this.dedupeLeaderboard();
     },
     dedupeLeaderboard() {
         const lb = this.getLeaderboard();
+        if (!lb || typeof lb !== 'object') return;
         let changed = false;
         for (const mode of Object.keys(lb)) {
             const best = {};
@@ -347,7 +352,8 @@ const ProfileManager = {
     },
     getAllProfiles() {
         const raw = localStorage.getItem(this.PROFILES_KEY);
-        return raw ? JSON.parse(raw) : [];
+        if (!raw) return [];
+        try { return JSON.parse(raw); } catch (e) { return []; }
     },
     getProfile() {
         const id = this.getActiveId();
@@ -359,7 +365,7 @@ const ProfileManager = {
         return raw ? Number(raw) : null;
     },
     saveProfile(profile) {
-        if (!profile.id) profile.id = Date.now();
+        if (!profile.id) profile.id = Date.now() * 1000 + Math.floor(Math.random() * 1000);
         const profiles = this.getAllProfiles();
         const idx = profiles.findIndex(p => p.id === profile.id);
         if (idx >= 0) profiles[idx] = profile;
@@ -384,7 +390,8 @@ const ProfileManager = {
     },
     getLeaderboard() {
         const raw = localStorage.getItem(this.LEADERBOARD_KEY);
-        return raw ? JSON.parse(raw) : { dodgeball: [], dribble: [], penalties: [] };
+        if (!raw) return { dodgeball: [], dribble: [], penalties: [] };
+        try { return JSON.parse(raw); } catch (e) { return { dodgeball: [], dribble: [], penalties: [] }; }
     },
     addEntry(mode, entryData) {
         const profile = this.getProfile();
@@ -424,14 +431,18 @@ class BootScene extends Phaser.Scene {
         sfx.init();
         this.generateTextures();
         ProfileManager.migrateIfNeeded();
-        const profiles = ProfileManager.getAllProfiles();
-        if (profiles.length === 0) {
+        if (!ProfileManager.hasProfile()) {
             this.scene.start('Profile');
-        } else if (profiles.length === 1) {
-            ProfileManager.setActive(profiles[0].id);
+        } else if (ProfileManager.hasActiveProfile()) {
             this.scene.start('Title');
         } else {
-            this.scene.start('ProfileSelect');
+            const profiles = ProfileManager.getAllProfiles();
+            if (profiles.length === 1) {
+                ProfileManager.setActive(profiles[0].id);
+                this.scene.start('Title');
+            } else {
+                this.scene.start('ProfileSelect');
+            }
         }
     }
 
@@ -719,7 +730,7 @@ class ProfileSelectScene extends Phaser.Scene {
                     this.scene.start('Profile');
                     return;
                 }
-                this.selected = Math.min(this.selected, this.profiles.length);
+                this.selected = Math.min(this.selected, this.profiles.length - 1);
                 sfx.select();
                 this.buildList();
             }
@@ -1200,7 +1211,7 @@ class ProfileScene extends Phaser.Scene {
 
     finishProfile(clubName) {
         const profile = {
-            id: this.existingProfile ? this.existingProfile.id : Date.now(),
+            id: this.existingProfile ? this.existingProfile.id : Date.now() * 1000 + Math.floor(Math.random() * 1000),
             name: this.currentName.trim(),
             country: this.selectedCountry,
             club: clubName,
@@ -1715,7 +1726,7 @@ class TitleScene extends Phaser.Scene {
             this.scene.start('Leaderboard');
         } else if (this.utilSelected === 1) {
             this.scene.start('Profile', { returnTo: 'Title' });
-        } else {
+        } else if (this.utilSelected === 2) {
             this.scene.start('ProfileSelect');
         }
     }
