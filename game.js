@@ -463,20 +463,30 @@ class TitleScene extends Phaser.Scene {
 
         // Mode buttons
         this.selected = 0;
-        const btnStyle = { fontSize: '26px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 5 };
-        const descStyle = { fontSize: '13px', fontFamily: 'Arial', color: '#aaddaa', align: 'center' };
+        const btnStyle = { fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 5 };
+        const descStyle = { fontSize: '11px', fontFamily: 'Arial', color: '#aaddaa', align: 'center' };
 
-        this.modeBtn0 = this.add.text(GAME_W / 2 - 170, 210, 'Dodgeball', btnStyle).setOrigin(0.5);
-        this.modeDesc0 = this.add.text(GAME_W / 2 - 170, 245, 'Run through the stadium\ndodging soccer balls\nSPACE to kick them back', descStyle).setOrigin(0.5);
+        this.modeBtns = [];
+        this.modeDescs = [];
 
-        this.modeBtn1 = this.add.text(GAME_W / 2 + 170, 210, 'Dribble', btnStyle).setOrigin(0.5);
-        this.modeDesc1 = this.add.text(GAME_W / 2 + 170, 245, 'Dribble past defenders\nand score a goal\nMore defenders each level', descStyle).setOrigin(0.5);
+        const modeX = [GAME_W / 2 - 260, GAME_W / 2, GAME_W / 2 + 260];
+        const names = ['Dodgeball', 'Dribble', 'Penalties'];
+        const descs = [
+            'Run through the stadium\ndodging soccer balls\nSPACE to kick them back',
+            'Dribble past defenders\nand score a goal\nMore defenders each level',
+            'Penalty shootout!\nShoot then save\nBest of 5 rounds',
+        ];
 
-        // High scores
         const hiDodge = localStorage.getItem('stadiumRunner_hiScore') || 0;
         const hiDribble = localStorage.getItem('dribble_hiLevel') || 0;
-        this.add.text(GAME_W / 2 - 170, 290, `Best: ${hiDodge} pts`, { fontSize: '14px', fontFamily: 'Arial', color: '#ffdd44' }).setOrigin(0.5);
-        this.add.text(GAME_W / 2 + 170, 290, `Best: Level ${hiDribble}`, { fontSize: '14px', fontFamily: 'Arial', color: '#ffdd44' }).setOrigin(0.5);
+        const hiPen = localStorage.getItem('penalty_hiScore') || 0;
+        const hiLabels = [`Best: ${hiDodge} pts`, `Best: Level ${hiDribble}`, `Best: ${hiPen} pts`];
+
+        for (let i = 0; i < 3; i++) {
+            this.modeBtns.push(this.add.text(modeX[i], 210, names[i], btnStyle).setOrigin(0.5));
+            this.modeDescs.push(this.add.text(modeX[i], 245, descs[i], descStyle).setOrigin(0.5));
+            this.add.text(modeX[i], 290, hiLabels[i], { fontSize: '13px', fontFamily: 'Arial', color: '#ffdd44' }).setOrigin(0.5);
+        }
 
         // Controls hint
         this.add.text(GAME_W / 2, 400, 'Arrow Keys / WASD to move  |  Touch & drag on mobile', {
@@ -492,26 +502,23 @@ class TitleScene extends Phaser.Scene {
         this.updateModeSelection();
 
         // Input
-        this.input.keyboard.on('keydown-LEFT', () => { this.selected = 0; this.updateModeSelection(); });
-        this.input.keyboard.on('keydown-RIGHT', () => { this.selected = 1; this.updateModeSelection(); });
-        this.input.keyboard.on('keydown-A', () => { this.selected = 0; this.updateModeSelection(); });
-        this.input.keyboard.on('keydown-D', () => { this.selected = 1; this.updateModeSelection(); });
+        this.input.keyboard.on('keydown-LEFT', () => { this.selected = Math.max(0, this.selected - 1); this.updateModeSelection(); });
+        this.input.keyboard.on('keydown-RIGHT', () => { this.selected = Math.min(2, this.selected + 1); this.updateModeSelection(); });
+        this.input.keyboard.on('keydown-A', () => { this.selected = Math.max(0, this.selected - 1); this.updateModeSelection(); });
+        this.input.keyboard.on('keydown-D', () => { this.selected = Math.min(2, this.selected + 1); this.updateModeSelection(); });
         this.input.keyboard.on('keydown-SPACE', () => this.startGame());
 
-        this.modeBtn0.setInteractive({ useHandCursor: true });
-        this.modeBtn1.setInteractive({ useHandCursor: true });
-        this.modeBtn0.on('pointerdown', () => { this.selected = 0; this.startGame(); });
-        this.modeBtn1.on('pointerdown', () => { this.selected = 1; this.startGame(); });
+        this.modeBtns.forEach((btn, i) => {
+            btn.setInteractive({ useHandCursor: true });
+            btn.on('pointerdown', () => { this.selected = i; this.startGame(); });
+        });
     }
 
     updateModeSelection() {
-        if (this.selected === 0) {
-            this.modeBtn0.setColor('#44ff88').setScale(1.15);
-            this.modeBtn1.setColor('#888888').setScale(1);
-        } else {
-            this.modeBtn0.setColor('#888888').setScale(1);
-            this.modeBtn1.setColor('#44ff88').setScale(1.15);
-        }
+        this.modeBtns.forEach((btn, i) => {
+            btn.setColor(i === this.selected ? '#44ff88' : '#888888');
+            btn.setScale(i === this.selected ? 1.15 : 1);
+        });
     }
 
     drawMiniStadium() {
@@ -531,8 +538,10 @@ class TitleScene extends Phaser.Scene {
         sfx.select();
         if (this.selected === 0) {
             this.scene.start('Game', { level: 1 });
-        } else {
+        } else if (this.selected === 1) {
             this.scene.start('Dribble', { level: 1 });
+        } else {
+            this.scene.start('Penalty', { round: 1, playerGoals: 0, cpuGoals: 0, score: 0 });
         }
     }
 }
@@ -1156,7 +1165,9 @@ class DribbleScene extends Phaser.Scene {
         this.keeper = this.physics.add.sprite(GAME_W - 50, GAME_H / 2, 'goalkeeper').setDepth(10);
         this.keeper.body.setSize(18, 26).setOffset(5, 8);
         this.keeperDir = 1;
-        this.keeperSpeed = 60 + (this.level - 1) * 12;
+        this.keeperSpeed = 40 + (this.level - 1) * 8;
+        this.keeperDiving = false;
+        this.keeperDiveTarget = 0;
 
         // ── Collisions ──
         this.physics.add.overlap(this.player, this.defenders, this.tackled, null, this);
@@ -1245,7 +1256,7 @@ class DribbleScene extends Phaser.Scene {
     }
 
     getDefenderSpeed() {
-        return 55 + (this.level - 1) * 10;
+        return 35 + (this.level - 1) * 7;
     }
 
     spawnDefenders() {
@@ -1374,9 +1385,12 @@ class DribbleScene extends Phaser.Scene {
         // power: 0-100 → speed: 100-500
         const shotSpeed = 100 + (power / 100) * 400;
 
-        // shoot toward the goal
+        // shoot toward the goal — aim based on player's vertical position
         const goalX = GAME_W - 20;
-        const goalY = GAME_H / 2;
+        // aim at the player's current Y, clamped within the goal posts
+        const goalTop = GAME_H / 2 - 52;
+        const goalBot = GAME_H / 2 + 52;
+        const goalY = Phaser.Math.Clamp(this.player.y, goalTop, goalBot);
         const angle = Phaser.Math.Angle.Between(this.dribbleBall.x, this.dribbleBall.y, goalX, goalY);
 
         this.dribbleBall.body.setVelocity(
@@ -1656,6 +1670,38 @@ class DribbleScene extends Phaser.Scene {
             // white border
             this.powerBarGfx.lineStyle(1, 0xffffff, 0.5);
             this.powerBarGfx.strokeRoundedRect(bx - 1, by - 1, barW + 2, barH + 2, 2);
+
+            // aim line — dotted line from ball to goal target
+            const aimGoalTop = GAME_H / 2 - 52;
+            const aimGoalBot = GAME_H / 2 + 52;
+            const aimY = Phaser.Math.Clamp(this.player.y, aimGoalTop, aimGoalBot);
+            this.powerBarGfx.lineStyle(2, 0xffffff, 0.35);
+            const dashLen = 8;
+            const gapLen = 6;
+            const sx = this.dribbleBall.x;
+            const sy = this.dribbleBall.y;
+            const ex = GAME_W - 20;
+            const ey = aimY;
+            const totalDist = Phaser.Math.Distance.Between(sx, sy, ex, ey);
+            const dx = (ex - sx) / totalDist;
+            const dy = (ey - sy) / totalDist;
+            let d = 0;
+            while (d < totalDist) {
+                const x1 = sx + dx * d;
+                const y1 = sy + dy * d;
+                const seg = Math.min(dashLen, totalDist - d);
+                const x2 = sx + dx * (d + seg);
+                const y2 = sy + dy * (d + seg);
+                this.powerBarGfx.moveTo(x1, y1);
+                this.powerBarGfx.lineTo(x2, y2);
+                this.powerBarGfx.strokePath();
+                d += dashLen + gapLen;
+            }
+            // aim crosshair at target
+            this.powerBarGfx.lineStyle(2, 0xff4444, 0.6);
+            this.powerBarGfx.strokeCircle(ex, ey, 8);
+            this.powerBarGfx.moveTo(ex - 12, ey); this.powerBarGfx.lineTo(ex + 12, ey); this.powerBarGfx.strokePath();
+            this.powerBarGfx.moveTo(ex, ey - 12); this.powerBarGfx.lineTo(ex, ey + 12); this.powerBarGfx.strokePath();
         }
 
         // ── Dribble ball follows player (only while holding) ──
@@ -1700,21 +1746,23 @@ class DribbleScene extends Phaser.Scene {
             }
         });
 
-        // ── Goalkeeper AI — patrols in front of the goal ──
+        // ── Goalkeeper AI — stands still, dives slowly when shot is fired ──
         if (!this.keeper.getData('stunned')) {
-            const goalTop = GAME_H / 2 - 55;
-            const goalBot = GAME_H / 2 + 55;
-            const ky = this.keeper.y;
-
-            if (ky <= goalTop) this.keeperDir = 1;
-            if (ky >= goalBot) this.keeperDir = -1;
-
             if (this.shotFired) {
-                const diff = this.dribbleBall.y - ky;
-                const reactSpeed = this.keeperSpeed * 1.8;
-                this.keeper.body.setVelocityY(Phaser.Math.Clamp(diff * 5, -reactSpeed, reactSpeed));
+                if (!this.keeperDiving) {
+                    this.keeperDiving = true;
+                    this.keeperDiveTarget = this.dribbleBall.y + Phaser.Math.Between(-20, 20);
+                }
+                const diff = this.keeperDiveTarget - this.keeper.y;
+                const diveSpeed = 30 + (this.level - 1) * 5;
+                if (Math.abs(diff) > 4) {
+                    this.keeper.body.setVelocityY(diff > 0 ? diveSpeed : -diveSpeed);
+                } else {
+                    this.keeper.body.setVelocityY(0);
+                }
             } else {
-                this.keeper.body.setVelocityY(this.keeperDir * this.keeperSpeed);
+                this.keeperDiving = false;
+                this.keeper.body.setVelocityY(0);
             }
         }
 
@@ -1727,6 +1775,792 @@ class DribbleScene extends Phaser.Scene {
         const barColor = this.stamina < 20 ? 0xff4444 : (this.sprinting ? 0x44aaff : 0x44dd66);
         this.staminaBarFill.fillStyle(barColor);
         this.staminaBarFill.fillRoundedRect(12, GAME_H - STAND_H + 26, 116 * pct, 8, 2);
+    }
+}
+
+// ── Penalty Shootout Scene ─────────────────────────────────────────
+class PenaltyScene extends Phaser.Scene {
+    constructor() { super('Penalty'); }
+
+    init(data) {
+        this.round = data.round || 1;
+        this.playerGoals = data.playerGoals || 0;
+        this.cpuGoals = data.cpuGoals || 0;
+        this.score = data.score || 0;
+        this.maxRounds = 5;
+        // each round: player shoots then player saves
+        this.phase = 'shoot'; // 'shoot' or 'save'
+        this.done = false;
+    }
+
+    create() {
+        this.cameras.main.setBackgroundColor('#1a472a');
+        this.cursors = this.input.keyboard.createCursorKeys();
+        this.wasd = this.input.keyboard.addKeys('W,A,S,D');
+        this.spaceKey = this.input.keyboard.addKey('SPACE');
+
+        // particles
+        this.starEmitter = this.add.particles(0, 0, 'particle_yellow', {
+            speed: { min: 50, max: 150 }, scale: { start: 1, end: 0 },
+            lifespan: 400, blendMode: 'ADD', emitting: false,
+        }).setDepth(50);
+
+        this.setupShootPhase();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SHOOT PHASE — behind the penalty taker
+    // ═══════════════════════════════════════════════════════════════
+    setupShootPhase() {
+        this.phase = 'shoot';
+        this.done = false;
+        this.clearScene();
+
+        const g = this.add.graphics().setDepth(0);
+        const vpX = GAME_W / 2, vpY = 60;
+
+        // sky / stands behind the goal
+        g.fillStyle(0x334466); g.fillRect(0, 0, GAME_W, vpY + 10);
+
+        // fans behind the goal (in the stands)
+        const fansG = this.add.graphics().setDepth(1);
+        const hsvWheel = Phaser.Display.Color.HSVColorWheel();
+        fansG.fillStyle(0x554433, 0.6);
+        fansG.fillRect(0, 0, GAME_W, vpY + 5);
+        for (let row = 0; row < 3; row++) {
+            const rowY = 8 + row * 18;
+            for (let i = 0; i < 35; i++) {
+                const fx = Phaser.Math.Between(10, GAME_W - 10);
+                const fy = rowY + Phaser.Math.Between(-4, 4);
+                const c = hsvWheel[Phaser.Math.Between(0, 359)].color;
+                fansG.fillStyle(c, 0.6);
+                fansG.fillCircle(fx, fy, Phaser.Math.Between(3, 5));
+                fansG.fillStyle(c, 0.4);
+                fansG.fillRect(fx - 3, fy + 4, 6, 7);
+            }
+        }
+
+        // pitch — mowed stripe pattern
+        g.fillStyle(0x2d8a4e); g.fillRect(0, vpY + 10, GAME_W, GAME_H - vpY - 10);
+        for (let row = 0; row < 20; row++) {
+            const y = vpY + 10 + row * 25;
+            if (row % 2 === 0) {
+                g.fillStyle(0x33995a, 0.4);
+                g.fillRect(0, y, GAME_W, 25);
+            }
+        }
+
+        // perspective side lines
+        g.lineStyle(2, 0xffffff, 0.3);
+        g.moveTo(0, GAME_H); g.lineTo(vpX - 140, vpY + 30); g.strokePath();
+        g.moveTo(GAME_W, GAME_H); g.lineTo(vpX + 140, vpY + 30); g.strokePath();
+
+        // penalty box (perspective trapezoid)
+        g.lineStyle(2, 0xffffff, 0.25);
+        g.beginPath();
+        g.moveTo(vpX - 220, GAME_H - 40);
+        g.lineTo(vpX - 130, vpY + 35);
+        g.lineTo(vpX + 130, vpY + 35);
+        g.lineTo(vpX + 220, GAME_H - 40);
+        g.closePath();
+        g.strokePath();
+
+        // six-yard box
+        g.lineStyle(2, 0xffffff, 0.2);
+        g.beginPath();
+        g.moveTo(vpX - 100, vpY + 90);
+        g.lineTo(vpX - 80, vpY + 40);
+        g.lineTo(vpX + 80, vpY + 40);
+        g.lineTo(vpX + 100, vpY + 90);
+        g.closePath();
+        g.strokePath();
+
+        // penalty spot
+        g.fillStyle(0xffffff, 0.5);
+        g.fillCircle(vpX, GAME_H - 90, 3);
+
+        // center circle arc (partial, behind player)
+        g.lineStyle(2, 0xffffff, 0.15);
+        g.beginPath();
+        g.arc(vpX, GAME_H + 60, 80, Phaser.Math.DegToRad(200), Phaser.Math.DegToRad(340), false);
+        g.strokePath();
+
+        // goal — net background + mesh + thick white posts
+        const goalW = 200, goalH = 70;
+        const goalX = vpX - goalW / 2, goalY = vpY;
+        g.fillStyle(0x1a1a2a, 0.4);
+        g.fillRect(goalX, goalY, goalW, goalH);
+        g.lineStyle(1, 0xcccccc, 0.25);
+        for (let nx = goalX + 15; nx < goalX + goalW; nx += 15) {
+            g.moveTo(nx, goalY); g.lineTo(nx, goalY + goalH); g.strokePath();
+        }
+        for (let ny = goalY + 12; ny < goalY + goalH; ny += 12) {
+            g.moveTo(goalX, ny); g.lineTo(goalX + goalW, ny); g.strokePath();
+        }
+        g.lineStyle(5, 0xffffff, 0.95);
+        g.strokeRect(goalX, goalY, goalW, goalH);
+
+        // store goal bounds for aim mapping
+        this.goalBounds = { x: goalX, y: goalY, w: goalW, h: goalH };
+
+        // AI keeper in goal (small, far away)
+        this.aiKeeper = this.add.graphics().setDepth(10);
+        this.aiKeeper.fillStyle(0xeecc00);
+        this.aiKeeper.fillRoundedRect(-8, -14, 16, 28, 3);
+        this.aiKeeper.fillStyle(0xddbb88);
+        this.aiKeeper.fillCircle(0, -10, 5);
+        this.aiKeeper.fillStyle(0x44cc44);
+        this.aiKeeper.fillCircle(-8, -2, 3);
+        this.aiKeeper.fillCircle(8, -2, 3);
+        this.aiKeeper.setPosition(vpX, goalY + goalH / 2 + 5);
+
+        // player (big, bottom of screen — behind view)
+        this.shooterGfx = this.add.graphics().setDepth(5);
+        // jersey
+        this.shooterGfx.fillStyle(0x2255ff);
+        this.shooterGfx.fillRoundedRect(-20, -35, 40, 55, 6);
+        // head
+        this.shooterGfx.fillStyle(0xffcc88);
+        this.shooterGfx.fillCircle(0, -30, 12);
+        // hair
+        this.shooterGfx.fillStyle(0x332211);
+        this.shooterGfx.fillRect(-10, -42, 20, 8);
+        // shirt detail + number
+        this.shooterGfx.fillStyle(0x4488ff);
+        this.shooterGfx.fillRect(-15, -15, 30, 20);
+        this.shooterGfx.fillStyle(0xffffff, 0.8);
+        this.shooterGfx.fillRect(-7, -12, 14, 14);
+        this.shooterGfx.fillStyle(0x2255ff);
+        this.shooterGfx.fillRect(-5, -10, 10, 10);
+        // white shorts
+        this.shooterGfx.fillStyle(0xffffff);
+        this.shooterGfx.fillRect(-14, 10, 12, 10);
+        this.shooterGfx.fillRect(2, 10, 12, 10);
+        // dark socks/boots
+        this.shooterGfx.fillStyle(0x222222);
+        this.shooterGfx.fillRect(-13, 18, 10, 12);
+        this.shooterGfx.fillRect(3, 18, 10, 12);
+        this.shooterGfx.setPosition(GAME_W / 2, GAME_H - 60);
+
+        // ball at feet
+        this.penBall = this.add.image(GAME_W / 2, GAME_H - 25, 'ball').setScale(1.5).setDepth(6);
+
+        // aim crosshair
+        this.aimX = vpX;
+        this.aimY = goalY + goalH / 2;
+        this.aimGfx = this.add.graphics().setDepth(20);
+
+        // power
+        this.charging = false;
+        this.shotPower = 0;
+        this.powerGfx = this.add.graphics().setDepth(20);
+
+        // HUD
+        this.createHUD();
+
+        // instructions
+        this.phaseLabel = this.add.text(GAME_W / 2, GAME_H - 10, 'Aim with Arrow Keys, hold SPACE to power up', {
+            fontSize: '14px', fontFamily: 'Arial', color: '#ccffcc',
+        }).setOrigin(0.5).setDepth(100);
+
+        // round banner
+        const banner = this.add.text(GAME_W / 2, GAME_H / 2, `Round ${this.round} — Your Shot`, {
+            fontSize: '36px', fontFamily: 'Arial Black, Arial',
+            color: '#ffff44', stroke: '#000000', strokeThickness: 5,
+        }).setOrigin(0.5).setDepth(200);
+        this.tweens.add({ targets: banner, alpha: 0, scale: 1.5, duration: 1200, ease: 'Power2', onComplete: () => banner.destroy() });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SAVE PHASE — inside the net, looking out
+    // ═══════════════════════════════════════════════════════════════
+    setupSavePhase() {
+        this.phase = 'save';
+        this.done = false;
+        this.clearScene();
+
+        const g = this.add.graphics().setDepth(0);
+
+        // view from inside the net — field stretches out with perspective
+        // sky / far stand at top
+        g.fillStyle(0x334466); g.fillRect(0, 0, GAME_W, GAME_H * 0.2);
+
+        // far-side fans (top of screen, behind the pitch)
+        const farFansG = this.add.graphics().setDepth(1);
+        const hsvWheel = Phaser.Display.Color.HSVColorWheel();
+        farFansG.fillStyle(0x554433, 0.5);
+        farFansG.fillRect(0, 0, GAME_W, GAME_H * 0.2);
+        for (let row = 0; row < 2; row++) {
+            const rowY = GAME_H * 0.05 + row * 22;
+            for (let i = 0; i < 30; i++) {
+                const fx = Phaser.Math.Between(20, GAME_W - 20);
+                const fy = rowY + Phaser.Math.Between(-5, 5);
+                const c = hsvWheel[Phaser.Math.Between(0, 359)].color;
+                farFansG.fillStyle(c, 0.45);
+                farFansG.fillCircle(fx, fy, Phaser.Math.Between(3, 5));
+                farFansG.fillStyle(c, 0.3);
+                farFansG.fillRect(fx - 3, fy + 4, 6, 6);
+            }
+        }
+
+        // pitch
+        g.fillStyle(0x2d8a4e); g.fillRect(0, GAME_H * 0.2, GAME_W, GAME_H * 0.8);
+        // mow stripes
+        for (let row = 0; row < 14; row++) {
+            const y = GAME_H * 0.2 + row * 28;
+            if (row % 2 === 0) {
+                g.fillStyle(0x33995a, 0.4);
+                g.fillRect(0, y, GAME_W, 28);
+            }
+        }
+
+        // field lines — center line, penalty box outlines (perspective from inside net)
+        const vpX2 = GAME_W / 2, vpY2 = GAME_H * 0.25;
+        g.lineStyle(2, 0xffffff, 0.2);
+        // side touchlines converging
+        g.moveTo(0, GAME_H * 0.2); g.lineTo(vpX2 - 200, GAME_H); g.strokePath();
+        g.moveTo(GAME_W, GAME_H * 0.2); g.lineTo(vpX2 + 200, GAME_H); g.strokePath();
+        // penalty box
+        g.lineStyle(2, 0xffffff, 0.2);
+        g.beginPath();
+        g.moveTo(vpX2 - 180, GAME_H);
+        g.lineTo(vpX2 - 100, GAME_H * 0.4);
+        g.lineTo(vpX2 + 100, GAME_H * 0.4);
+        g.lineTo(vpX2 + 180, GAME_H);
+        g.closePath();
+        g.strokePath();
+        // six-yard box
+        g.lineStyle(2, 0xffffff, 0.15);
+        g.beginPath();
+        g.moveTo(vpX2 - 120, GAME_H);
+        g.lineTo(vpX2 - 70, GAME_H * 0.6);
+        g.lineTo(vpX2 + 70, GAME_H * 0.6);
+        g.lineTo(vpX2 + 120, GAME_H);
+        g.closePath();
+        g.strokePath();
+        // penalty spot
+        g.fillStyle(0xffffff, 0.4);
+        g.fillCircle(vpX2, GAME_H * 0.75, 3);
+
+        // goal frame (we're inside it — posts and crossbar only, no mesh)
+        const frameG = this.add.graphics().setDepth(15);
+        const frameW = 14;
+        // posts
+        frameG.fillStyle(0xffffff);
+        frameG.fillRect(0, 0, frameW, GAME_H);
+        frameG.fillRect(GAME_W - frameW, 0, frameW, GAME_H);
+        // crossbar
+        frameG.fillRect(0, 0, GAME_W, frameW);
+
+        // fans behind the net (behind us, visible at bottom)
+        const fansG = this.add.graphics().setDepth(1);
+        fansG.fillStyle(0x553322, 0.4);
+        fansG.fillRect(0, GAME_H * 0.65, GAME_W, GAME_H * 0.35);
+        for (let row = 0; row < 3; row++) {
+            const rowY = GAME_H * 0.68 + row * 30;
+            for (let i = 0; i < 30; i++) {
+                const fx = Phaser.Math.Between(20, GAME_W - 20);
+                const fy = rowY + Phaser.Math.Between(-8, 8);
+                const c = hsvWheel[Phaser.Math.Between(0, 359)].color;
+                fansG.fillStyle(c, 0.5);
+                fansG.fillCircle(fx, fy, Phaser.Math.Between(4, 7));
+                fansG.fillStyle(c, 0.35);
+                fansG.fillRect(fx - 4, fy + 5, 8, 10);
+            }
+        }
+
+        // AI shooter (visible, center of field)
+        this.aiShooter = this.add.graphics().setDepth(5);
+        // shadow
+        this.aiShooter.fillStyle(0x000000, 0.3);
+        this.aiShooter.fillEllipse(0, 28, 30, 8);
+        // boots
+        this.aiShooter.fillStyle(0x111111);
+        this.aiShooter.fillRect(-12, 18, 9, 10);
+        this.aiShooter.fillRect(3, 18, 9, 10);
+        // white shorts
+        this.aiShooter.fillStyle(0xffffff);
+        this.aiShooter.fillRect(-12, 8, 10, 12);
+        this.aiShooter.fillRect(2, 8, 10, 12);
+        // red jersey
+        this.aiShooter.fillStyle(0xdd2222);
+        this.aiShooter.fillRoundedRect(-14, -18, 28, 30, 4);
+        // jersey trim
+        this.aiShooter.fillStyle(0xff4444);
+        this.aiShooter.fillRect(-14, -18, 28, 4);
+        // number on chest
+        this.aiShooter.fillStyle(0xffffff, 0.9);
+        this.aiShooter.fillRect(-5, -10, 10, 12);
+        this.aiShooter.fillStyle(0xdd2222);
+        this.aiShooter.fillRect(-3, -8, 6, 8);
+        // head
+        this.aiShooter.fillStyle(0xddbb88);
+        this.aiShooter.fillCircle(0, -22, 8);
+        // hair
+        this.aiShooter.fillStyle(0x222222);
+        this.aiShooter.fillRect(-7, -30, 14, 6);
+        this.aiShooter.setPosition(GAME_W / 2, GAME_H - 60);
+
+        // ball starts small at shooter, will fly toward camera
+        this.penBall = this.add.image(GAME_W / 2, GAME_H - 35, 'ball').setScale(0.5).setDepth(10);
+
+        // player goalkeeper — stands center, will dive on choice
+        this.keeperGfx = this.add.graphics().setDepth(12);
+        this.keeperX = GAME_W / 2;
+        this.keeperGroundY = GAME_H * 0.55;
+        this.keeperY = this.keeperGroundY;
+        this.drawKeeper(0, 0);
+        this.keeperGfx.setPosition(this.keeperX, this.keeperY);
+
+        // CPU decides which side to shoot: 'left', 'center', or 'right'
+        const sides = ['left', 'center', 'right'];
+        this.cpuShotSide = sides[Phaser.Math.Between(0, 2)];
+        // map side to actual target coordinates
+        if (this.cpuShotSide === 'left') {
+            this.cpuShotTarget = { x: Phaser.Math.Between(frameW + 30, GAME_W * 0.3), y: Phaser.Math.Between(frameW + 30, GAME_H * 0.6) };
+        } else if (this.cpuShotSide === 'right') {
+            this.cpuShotTarget = { x: Phaser.Math.Between(GAME_W * 0.7, GAME_W - frameW - 30), y: Phaser.Math.Between(frameW + 30, GAME_H * 0.6) };
+        } else {
+            this.cpuShotTarget = { x: Phaser.Math.Between(GAME_W * 0.35, GAME_W * 0.65), y: Phaser.Math.Between(frameW + 30, GAME_H * 0.5) };
+        }
+
+        // dive choice state
+        this.diveChosen = false;
+        this.diveChoice = null; // 'left', 'center', 'right'
+
+        // state
+        this.saveTimer = 0;
+        this.shotInFlight = false;
+        this.shotDelay = 1800; // wait before CPU shoots
+
+        // HUD
+        this.createHUD();
+
+        // draw the 3 dive option arrows/labels
+        this.diveOptionsGfx = this.add.graphics().setDepth(18);
+        this.diveLabels = [];
+        const optStyle = { fontSize: '20px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4 };
+        const leftLabel = this.add.text(GAME_W * 0.15, GAME_H * 0.35, 'LEFT', optStyle).setOrigin(0.5).setDepth(20);
+        const centerLabel = this.add.text(GAME_W * 0.5, GAME_H * 0.35, 'CENTER', optStyle).setOrigin(0.5).setDepth(20);
+        const rightLabel = this.add.text(GAME_W * 0.85, GAME_H * 0.35, 'RIGHT', optStyle).setOrigin(0.5).setDepth(20);
+        this.diveLabels = [leftLabel, centerLabel, rightLabel];
+        // draw arrow indicators
+        this.drawDiveOptions();
+
+        this.phaseLabel = this.add.text(GAME_W / 2, GAME_H - 10, 'Press LEFT, DOWN (center), or RIGHT to dive!', {
+            fontSize: '14px', fontFamily: 'Arial', color: '#ccffcc',
+        }).setOrigin(0.5).setDepth(100);
+
+        const banner = this.add.text(GAME_W / 2, GAME_H / 2, `Round ${this.round} — Save It!`, {
+            fontSize: '36px', fontFamily: 'Arial Black, Arial',
+            color: '#44aaff', stroke: '#000000', strokeThickness: 5,
+        }).setOrigin(0.5).setDepth(200);
+        this.tweens.add({ targets: banner, alpha: 0, scale: 1.5, duration: 1200, ease: 'Power2', onComplete: () => banner.destroy() });
+    }
+
+    drawDiveOptions() {
+        this.diveOptionsGfx.clear();
+        const positions = [GAME_W * 0.15, GAME_W * 0.5, GAME_W * 0.85];
+        const y = GAME_H * 0.35;
+        for (let i = 0; i < 3; i++) {
+            // highlight box behind each option
+            this.diveOptionsGfx.fillStyle(0x000000, 0.3);
+            this.diveOptionsGfx.fillRoundedRect(positions[i] - 50, y - 20, 100, 40, 8);
+            // arrow indicator
+            this.diveOptionsGfx.lineStyle(3, 0xffff44, 0.8);
+            if (i === 0) {
+                // left arrow
+                this.diveOptionsGfx.moveTo(positions[i] - 35, y + 25); this.diveOptionsGfx.lineTo(positions[i] - 45, y + 35); this.diveOptionsGfx.lineTo(positions[i] - 35, y + 45); this.diveOptionsGfx.strokePath();
+            } else if (i === 2) {
+                // right arrow
+                this.diveOptionsGfx.moveTo(positions[i] + 35, y + 25); this.diveOptionsGfx.lineTo(positions[i] + 45, y + 35); this.diveOptionsGfx.lineTo(positions[i] + 35, y + 45); this.diveOptionsGfx.strokePath();
+            } else {
+                // down arrow
+                this.diveOptionsGfx.moveTo(positions[i] - 10, y + 30); this.diveOptionsGfx.lineTo(positions[i], y + 45); this.diveOptionsGfx.lineTo(positions[i] + 10, y + 30); this.diveOptionsGfx.strokePath();
+            }
+        }
+    }
+
+    drawKeeper(offX, offY) {
+        this.keeperGfx.clear();
+        // large keeper (close-up view from inside net)
+        this.keeperGfx.fillStyle(0xeecc00);
+        this.keeperGfx.fillRoundedRect(-18 + offX, -28 + offY, 36, 50, 5);
+        this.keeperGfx.fillStyle(0xffcc88);
+        this.keeperGfx.fillCircle(offX, -24 + offY, 10);
+        // gloves
+        this.keeperGfx.fillStyle(0x44ff44);
+        this.keeperGfx.fillRoundedRect(-30 + offX, -14 + offY, 14, 14, 3);
+        this.keeperGfx.fillRoundedRect(16 + offX, -14 + offY, 14, 14, 3);
+        this.keeperGfx.fillStyle(0x222222);
+        this.keeperGfx.fillRect(-12 + offX, 22 + offY, 10, 16);
+        this.keeperGfx.fillRect(2 + offX, 22 + offY, 10, 16);
+    }
+
+    clearScene() {
+        // remove all children except camera
+        this.children.removeAll(true);
+    }
+
+    createHUD() {
+        const scoreStyle = { fontSize: '18px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4 };
+        this.add.text(GAME_W / 2, 30, `Round ${this.round} / ${this.maxRounds}`, scoreStyle).setOrigin(0.5).setDepth(100);
+        this.add.text(GAME_W / 2 - 80, 52, `You: ${this.playerGoals}`, {
+            fontSize: '16px', fontFamily: 'Arial', color: '#44ff88',
+        }).setOrigin(0.5).setDepth(100);
+        this.add.text(GAME_W / 2 + 80, 52, `CPU: ${this.cpuGoals}`, {
+            fontSize: '16px', fontFamily: 'Arial', color: '#ff6644',
+        }).setOrigin(0.5).setDepth(100);
+
+        if (this.score > 0) {
+            this.add.text(GAME_W - 10, 30, `Score: ${this.score}`, {
+                fontSize: '16px', fontFamily: 'Arial', color: '#ffdd44', stroke: '#000000', strokeThickness: 3,
+            }).setOrigin(1, 0).setDepth(100);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // UPDATE
+    // ═══════════════════════════════════════════════════════════════
+    update(time, delta) {
+        if (this.done) return;
+        const dt = delta / 1000;
+
+        if (this.phase === 'shoot') {
+            this.updateShoot(dt, delta);
+        } else {
+            this.updateSave(dt, delta);
+        }
+    }
+
+    updateShoot(dt, delta) {
+        const gb = this.goalBounds;
+        const aimSpeed = 150;
+
+        // aim
+        if (this.cursors.left.isDown || this.wasd.A.isDown) this.aimX -= aimSpeed * dt;
+        if (this.cursors.right.isDown || this.wasd.D.isDown) this.aimX += aimSpeed * dt;
+        if (this.cursors.up.isDown || this.wasd.W.isDown) this.aimY -= aimSpeed * dt;
+        if (this.cursors.down.isDown || this.wasd.S.isDown) this.aimY += aimSpeed * dt;
+
+        this.aimX = Phaser.Math.Clamp(this.aimX, gb.x + 10, gb.x + gb.w - 10);
+        this.aimY = Phaser.Math.Clamp(this.aimY, gb.y + 10, gb.y + gb.h - 10);
+
+        // draw crosshair
+        this.aimGfx.clear();
+        this.aimGfx.lineStyle(2, 0xff4444, 0.8);
+        this.aimGfx.strokeCircle(this.aimX, this.aimY, 10);
+        this.aimGfx.moveTo(this.aimX - 15, this.aimY); this.aimGfx.lineTo(this.aimX + 15, this.aimY); this.aimGfx.strokePath();
+        this.aimGfx.moveTo(this.aimX, this.aimY - 15); this.aimGfx.lineTo(this.aimX, this.aimY + 15); this.aimGfx.strokePath();
+
+        // power charge
+        if (this.spaceKey.isDown) {
+            if (!this.charging) { this.charging = true; this.shotPower = 0; }
+            this.shotPower = Math.min(100, this.shotPower + 70 * dt);
+        } else if (this.charging) {
+            this.executeShot();
+            return;
+        }
+
+        // power bar
+        this.powerGfx.clear();
+        if (this.charging) {
+            const bx = GAME_W / 2 - 60, by = GAME_H - 35, bw = 120, bh = 10;
+            const pct = this.shotPower / 100;
+            this.powerGfx.fillStyle(0x000000, 0.6);
+            this.powerGfx.fillRoundedRect(bx, by, bw, bh, 3);
+            const col = pct < 0.4 ? 0x44dd66 : pct < 0.75 ? 0xdddd44 : 0xff3333;
+            this.powerGfx.fillStyle(col);
+            this.powerGfx.fillRoundedRect(bx + 2, by + 2, (bw - 4) * pct, bh - 4, 2);
+        }
+    }
+
+    executeShot() {
+        this.done = true;
+        this.charging = false;
+        sfx.kick();
+
+        const power = this.shotPower;
+        const gb = this.goalBounds;
+
+        // accuracy penalty — higher power = more random offset
+        // power 0-50: very accurate, 50-80: some spread, 80-100: wild
+        const errorScale = power < 50 ? power * 0.3 : power < 80 ? 15 + (power - 50) * 1.2 : 51 + (power - 80) * 2.5;
+        const offsetX = (Math.random() - 0.5) * errorScale * 2;
+        const offsetY = (Math.random() - 0.5) * errorScale * 2;
+
+        let tx = this.aimX + offsetX;
+        let ty = this.aimY + offsetY;
+
+        // check if the shot misses the goal entirely
+        const missed = tx < gb.x || tx > gb.x + gb.w || ty < gb.y || ty > gb.y + gb.h;
+
+        // slower shot flight — high power still faster but overall much slower
+        const dur = 700 + (100 - power) * 6;
+
+        this.tweens.add({
+            targets: this.penBall,
+            x: tx, y: ty,
+            scale: 0.6,
+            duration: dur,
+            ease: 'Sine.easeIn',
+            onComplete: () => {
+                if (missed) {
+                    sfx.hit();
+                    this.showResult('MISSED!', '#ffaa44');
+                    this.time.delayedCall(1500, () => this.setupSavePhase());
+                    return;
+                }
+
+                // AI keeper dives (random, sometimes wrong)
+                const keeperDiveX = Phaser.Math.Between(gb.x + 20, gb.x + gb.w - 20);
+                const keeperDiveY = Phaser.Math.Between(gb.y + 10, gb.y + gb.h - 10);
+
+                this.tweens.add({
+                    targets: this.aiKeeper,
+                    x: keeperDiveX, y: keeperDiveY,
+                    duration: 300,
+                    ease: 'Power2',
+                });
+
+                // did keeper save it?
+                this.time.delayedCall(350, () => {
+                    const dist = Phaser.Math.Distance.Between(tx, ty, keeperDiveX, keeperDiveY);
+                    const saved = dist < 35;
+
+                    if (saved) {
+                        sfx.tackle();
+                        this.showResult('SAVED!', '#ff6644');
+                    } else {
+                        sfx.goal();
+                        this.playerGoals++;
+                        const pts = Math.floor(power * 2);
+                        this.score += pts;
+                        this.showResult('GOAL!', '#44ff88');
+                        for (let i = 0; i < 6; i++) {
+                            this.time.delayedCall(i * 60, () => {
+                                this.starEmitter.emitParticleAt(tx + Phaser.Math.Between(-20, 20), ty + Phaser.Math.Between(-20, 20), 5);
+                            });
+                        }
+                    }
+
+                    // transition to save phase
+                    this.time.delayedCall(1500, () => this.setupSavePhase());
+                });
+            }
+        });
+    }
+
+    updateSave(dt, delta) {
+        // pick a side before the shot — lock in choice but don't dive yet
+        if (!this.diveChosen) {
+            if (Phaser.Input.Keyboard.JustDown(this.cursors.left) || Phaser.Input.Keyboard.JustDown(this.wasd.A)) {
+                this.lockInChoice('left');
+            } else if (Phaser.Input.Keyboard.JustDown(this.cursors.right) || Phaser.Input.Keyboard.JustDown(this.wasd.D)) {
+                this.lockInChoice('right');
+            } else if (Phaser.Input.Keyboard.JustDown(this.cursors.down) || Phaser.Input.Keyboard.JustDown(this.wasd.S)) {
+                this.lockInChoice('center');
+            }
+        }
+
+        // wait then CPU shoots
+        this.saveTimer += delta;
+        if (this.saveTimer >= this.shotDelay && !this.shotInFlight) {
+            // if player hasn't chosen yet, default to center
+            if (!this.diveChosen) this.lockInChoice('center');
+
+            this.shotInFlight = true;
+            sfx.kick();
+
+            // now the keeper dives
+            this.executeDive(this.diveChoice);
+
+            const tx = this.cpuShotTarget.x;
+            const ty = this.cpuShotTarget.y;
+            const dur = 1000 + Phaser.Math.Between(0, 400);
+
+            this.tweens.add({
+                targets: this.penBall,
+                x: tx, y: ty,
+                scale: 2.5,
+                duration: dur,
+                ease: 'Quad.easeIn',
+                onComplete: () => {
+                    this.done = true;
+                    const saved = this.diveChoice === this.cpuShotSide;
+
+                    if (saved) {
+                        sfx.tackle();
+                        this.showResult('SAVED!', '#44ff88');
+                        this.score += 50;
+                    } else {
+                        sfx.hit();
+                        this.cpuGoals++;
+                        this.showResult('GOAL...', '#ff6644');
+                        this.cameras.main.shake(200, 0.015);
+                    }
+
+                    this.time.delayedCall(1500, () => this.nextRound());
+                }
+            });
+        }
+    }
+
+    lockInChoice(side) {
+        this.diveChosen = true;
+        this.diveChoice = side;
+        sfx.select();
+
+        // highlight the chosen option, dim the others
+        const sideIndex = side === 'left' ? 0 : side === 'center' ? 1 : 2;
+        this.diveLabels.forEach((label, i) => {
+            if (i === sideIndex) {
+                label.setColor('#ffff44');
+                label.setScale(1.3);
+            } else {
+                label.setAlpha(0.3);
+            }
+        });
+
+        // redraw option boxes with highlight
+        this.diveOptionsGfx.clear();
+        const positions = [GAME_W * 0.15, GAME_W * 0.5, GAME_W * 0.85];
+        const y = GAME_H * 0.35;
+        for (let i = 0; i < 3; i++) {
+            if (i === sideIndex) {
+                this.diveOptionsGfx.fillStyle(0xffff44, 0.3);
+                this.diveOptionsGfx.fillRoundedRect(positions[i] - 55, y - 25, 110, 50, 10);
+                this.diveOptionsGfx.lineStyle(2, 0xffff44, 0.8);
+                this.diveOptionsGfx.strokeRoundedRect(positions[i] - 55, y - 25, 110, 50, 10);
+            } else {
+                this.diveOptionsGfx.fillStyle(0x000000, 0.15);
+                this.diveOptionsGfx.fillRoundedRect(positions[i] - 50, y - 20, 100, 40, 8);
+            }
+        }
+    }
+
+    executeDive(side) {
+        sfx.whoosh();
+
+        // hide choice UI
+        this.diveLabels.forEach(l => l.destroy());
+        this.diveOptionsGfx.clear();
+
+        // animate keeper diving to chosen side
+        let targetX, targetY;
+        if (side === 'left') {
+            targetX = GAME_W * 0.18;
+            targetY = this.keeperGroundY - 40;
+        } else if (side === 'right') {
+            targetX = GAME_W * 0.82;
+            targetY = this.keeperGroundY - 40;
+        } else {
+            targetX = GAME_W / 2;
+            targetY = this.keeperGroundY - 20;
+        }
+
+        this.tweens.add({
+            targets: this,
+            keeperX: targetX,
+            keeperY: targetY,
+            duration: 400,
+            ease: 'Power2',
+            onUpdate: () => {
+                this.keeperGfx.setPosition(this.keeperX, this.keeperY);
+                if (side === 'left') this.keeperGfx.setRotation(-0.5);
+                else if (side === 'right') this.keeperGfx.setRotation(0.5);
+            }
+        });
+    }
+
+    showResult(text, color) {
+        const txt = this.add.text(GAME_W / 2, GAME_H / 2, text, {
+            fontSize: '52px', fontFamily: 'Arial Black, Arial',
+            color: color, stroke: '#000000', strokeThickness: 6,
+        }).setOrigin(0.5).setDepth(200);
+        this.tweens.add({ targets: txt, scale: { from: 0.5, to: 1.2 }, duration: 400, ease: 'Back.easeOut' });
+    }
+
+    nextRound() {
+        if (this.round >= this.maxRounds) {
+            // shootout over
+            const prevHi = parseInt(localStorage.getItem('penalty_hiScore') || '0');
+            if (this.score > prevHi) localStorage.setItem('penalty_hiScore', this.score.toString());
+
+            const won = this.playerGoals > this.cpuGoals;
+            this.clearScene();
+            this.cameras.main.setBackgroundColor(won ? '#1a331a' : '#331a1a');
+
+            const g = this.add.graphics();
+            g.fillStyle(0x000000, 0.6); g.fillRect(0, 0, GAME_W, GAME_H);
+
+            this.add.text(GAME_W / 2, 80, won ? 'YOU WIN!' : 'YOU LOSE', {
+                fontSize: '52px', fontFamily: 'Arial Black, Arial',
+                color: won ? '#44ff88' : '#ff4444', stroke: '#000000', strokeThickness: 6,
+            }).setOrigin(0.5);
+
+            this.add.text(GAME_W / 2, 160, `${this.playerGoals} - ${this.cpuGoals}`, {
+                fontSize: '40px', fontFamily: 'Arial Black, Arial', color: '#ffffff',
+            }).setOrigin(0.5);
+
+            this.add.text(GAME_W / 2, 210, `Score: ${this.score}`, {
+                fontSize: '24px', fontFamily: 'Arial', color: '#ffdd44',
+            }).setOrigin(0.5);
+
+            const hiScore = Math.max(prevHi, this.score);
+            this.add.text(GAME_W / 2, 245, `Best: ${hiScore}`, {
+                fontSize: '18px', fontFamily: 'Arial', color: '#ffaa22',
+            }).setOrigin(0.5);
+
+            if (won) {
+                sfx.levelUp();
+                for (let i = 0; i < 8; i++) {
+                    this.time.delayedCall(i * 80, () => {
+                        this.starEmitter.emitParticleAt(GAME_W / 2 + Phaser.Math.Between(-100, 100), Phaser.Math.Between(60, 180), 6);
+                    });
+                }
+            } else {
+                sfx.hit();
+            }
+
+            const btnStyle = { fontSize: '22px', fontFamily: 'Arial Black, Arial', color: '#ffffff', stroke: '#000000', strokeThickness: 4 };
+            this.selected = 0;
+            this.endBtns = [
+                this.add.text(GAME_W / 2 - 120, 340, 'Play Again', btnStyle).setOrigin(0.5),
+                this.add.text(GAME_W / 2 + 120, 340, 'Menu', btnStyle).setOrigin(0.5),
+            ];
+            this.updateEndSelection();
+
+            this.time.delayedCall(500, () => {
+                this.input.keyboard.on('keydown-LEFT', () => { this.selected = 0; this.updateEndSelection(); });
+                this.input.keyboard.on('keydown-RIGHT', () => { this.selected = 1; this.updateEndSelection(); });
+                this.input.keyboard.on('keydown-SPACE', () => this.endConfirm());
+                this.endBtns.forEach((btn, i) => {
+                    btn.setInteractive({ useHandCursor: true });
+                    btn.on('pointerdown', () => { this.selected = i; this.endConfirm(); });
+                });
+            });
+        } else {
+            // next round
+            this.round++;
+            this.setupShootPhase();
+        }
+    }
+
+    updateEndSelection() {
+        this.endBtns.forEach((btn, i) => {
+            btn.setColor(i === this.selected ? '#44ff88' : '#888888');
+            btn.setScale(i === this.selected ? 1.15 : 1);
+        });
+    }
+
+    endConfirm() {
+        sfx.select();
+        if (this.selected === 0) {
+            this.scene.start('Penalty', { round: 1, playerGoals: 0, cpuGoals: 0, score: 0 });
+        } else {
+            this.scene.start('Title');
+        }
     }
 }
 
@@ -1854,7 +2688,7 @@ const config = {
         mode: Phaser.Scale.FIT,
         autoCenter: Phaser.Scale.CENTER_BOTH,
     },
-    scene: [BootScene, TitleScene, GameScene, DribbleScene, GameOverScene],
+    scene: [BootScene, TitleScene, GameScene, DribbleScene, PenaltyScene, GameOverScene],
 };
 
 const game = new Phaser.Game(config);
